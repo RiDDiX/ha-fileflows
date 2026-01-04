@@ -4,14 +4,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FileFlowsApi, FileFlowsApiError, FileFlowsAuthError, FileFlowsConnectionError
 from .const import (
@@ -48,29 +46,42 @@ def get_schema(
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
-    session = async_get_clientsession(hass, verify_ssl=data.get(CONF_VERIFY_SSL, True))
-    
+    # Don't pass session - let API create its own for proper SSL handling
     api = FileFlowsApi(
         host=data[CONF_HOST],
         port=data.get(CONF_PORT, DEFAULT_PORT),
         ssl=data.get(CONF_SSL, DEFAULT_SSL),
         verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
         access_token=data.get(CONF_ACCESS_TOKEN),
-        session=session,
     )
 
     try:
-        # Test connection with public remote/info/status endpoint (no auth required)
+        # Test connection with public remote/info/status endpoint
+        _LOGGER.debug(
+            "Testing connection to %s:%s (SSL: %s)",
+            data[CONF_HOST],
+            data.get(CONF_PORT, DEFAULT_PORT),
+            data.get(CONF_SSL, DEFAULT_SSL),
+        )
+        
         if not await api.test_connection():
             raise CannotConnect("Connection test failed")
+        
         # Get version info
         version = await api.get_version()
+        _LOGGER.info("Successfully connected to FileFlows %s", version)
+        
     except FileFlowsAuthError as err:
+        _LOGGER.error("Authentication failed: %s", err)
         raise InvalidAuth from err
     except FileFlowsConnectionError as err:
+        _LOGGER.error("Connection failed: %s", err)
         raise CannotConnect from err
     except FileFlowsApiError as err:
+        _LOGGER.error("API error: %s", err)
         raise CannotConnect from err
+    finally:
+        await api.close()
 
     return {"title": f"FileFlows ({data[CONF_HOST]})", "version": version}
 
