@@ -19,33 +19,49 @@ DEFAULT_SSL: Final = False
 DEFAULT_VERIFY_SSL: Final = True
 DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 
-# API Endpoints
+# API Endpoints - Remote Info (public/status endpoints)
+API_STATUS: Final = "/remote/info/status"
+API_SHRINKAGE: Final = "/remote/info/shrinkage-groups"
+API_UPDATE_AVAILABLE: Final = "/remote/info/update-available"
+API_VERSION: Final = "/remote/info/version"
+
+# API Endpoints - System
 API_SYSTEM_INFO: Final = "/api/system/info"
 API_SYSTEM_PAUSE: Final = "/api/system/pause"
 API_SYSTEM_RESUME: Final = "/api/system/resume"
+
+# API Endpoints - Nodes
 API_NODES: Final = "/api/node"
 API_NODE_BY_UID: Final = "/api/node/{uid}"
-API_NODE_ENABLE: Final = "/api/node/{uid}/enable"
-API_NODE_DISABLE: Final = "/api/node/{uid}/disable"
+API_NODE_ENABLE: Final = "/api/node/state/{uid}?enable=true"
+API_NODE_DISABLE: Final = "/api/node/state/{uid}?enable=false"
+
+# API Endpoints - Libraries
 API_LIBRARIES: Final = "/api/library"
 API_LIBRARY_BY_UID: Final = "/api/library/{uid}"
-API_LIBRARY_RESCAN: Final = "/api/library/{uid}/rescan"
+API_LIBRARY_RESCAN: Final = "/api/library/rescan/{uid}"
+
+# API Endpoints - Library Files
 API_LIBRARY_FILES: Final = "/api/library-file"
 API_LIBRARY_FILES_UNPROCESSED: Final = "/api/library-file/unprocessed"
 API_LIBRARY_FILES_PROCESSING: Final = "/api/library-file/processing"
 API_LIBRARY_FILES_PROCESSED: Final = "/api/library-file/processed"
 API_LIBRARY_FILES_FAILED: Final = "/api/library-file/failed"
-API_LIBRARY_FILE_REPROCESS: Final = "/api/library-file/{uid}/reprocess"
+API_LIBRARY_FILE_REPROCESS: Final = "/api/library-file/reprocess/{uid}"
+
+# API Endpoints - Flows
 API_FLOWS: Final = "/api/flow"
+
+# API Endpoints - Statistics/Dashboard
 API_STATISTICS: Final = "/api/statistics"
 API_STATISTICS_RUNNING: Final = "/api/statistics/running"
 API_WORKERS: Final = "/api/worker"
 API_SETTINGS: Final = "/api/settings"
-API_STATUS: Final = "/api/status"
-API_VERSION: Final = "/api/version"
 API_LOG: Final = "/api/log"
 API_DASHBOARD_SUMMARY: Final = "/api/dashboard/summary"
-API_SHRINKAGE: Final = "/api/statistics/shrinkage"
+
+# Auth Header
+AUTH_HEADER: Final = "x-token"
 
 # Services
 SERVICE_PAUSE_SYSTEM: Final = "pause_system"

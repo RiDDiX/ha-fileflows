@@ -33,6 +33,7 @@ from .const import (
     API_SYSTEM_INFO,
     API_SYSTEM_PAUSE,
     API_SYSTEM_RESUME,
+    API_UPDATE_AVAILABLE,
     API_VERSION,
     API_WORKERS,
 )
@@ -99,7 +100,7 @@ class FileFlowsApi:
             "Accept": "application/json",
         }
         if self._access_token:
-            headers["Authorization"] = f"Bearer {self._access_token}"
+            headers["x-token"] = self._access_token
         return headers
 
     async def _request(
@@ -173,14 +174,20 @@ class FileFlowsApi:
     async def test_connection(self) -> bool:
         """Test connection to FileFlows."""
         try:
-            await self.get_system_info()
-            return True
+            # Use status endpoint as it's the most reliable (used by Fenrus)
+            result = await self.get_status()
+            # Check if we got valid data
+            return result is not None and "queue" in result or "processed" in result
         except FileFlowsApiError:
             return False
 
     async def get_system_info(self) -> dict[str, Any]:
         """Get system information."""
-        return await self._get(API_SYSTEM_INFO)
+        try:
+            return await self._get(API_SYSTEM_INFO)
+        except FileFlowsApiError:
+            # Fallback to status if system/info doesn't exist
+            return await self.get_status()
 
     async def get_version(self) -> dict[str, Any]:
         """Get FileFlows version."""
@@ -285,9 +292,17 @@ class FileFlowsApi:
         """Get running/processing statistics."""
         return await self._get(API_STATISTICS_RUNNING)
 
-    async def get_shrinkage(self) -> dict[str, Any]:
+    async def get_shrinkage(self) -> list[dict[str, Any]]:
         """Get shrinkage/storage saved statistics."""
-        return await self._get(API_SHRINKAGE)
+        result = await self._get(API_SHRINKAGE)
+        return result if isinstance(result, list) else []
+
+    async def get_update_available(self) -> dict[str, Any]:
+        """Check if update is available."""
+        try:
+            return await self._get(API_UPDATE_AVAILABLE)
+        except FileFlowsApiError:
+            return {"UpdateAvailable": False}
 
     async def get_dashboard_summary(self) -> dict[str, Any]:
         """Get dashboard summary data."""
@@ -308,6 +323,7 @@ class FileFlowsApi:
     async def get_all_data(self) -> dict[str, Any]:
         """Get all data needed for sensors."""
         data: dict[str, Any] = {
+            "status": {},
             "system_info": {},
             "nodes": [],
             "libraries": [],
@@ -316,46 +332,59 @@ class FileFlowsApi:
             "processed_count": 0,
             "failed_count": 0,
             "statistics": {},
-            "shrinkage": {},
+            "shrinkage": [],
             "workers": [],
             "flows": [],
+            "update_available": False,
         }
 
         try:
-            # Get system info
+            # Get status (primary data source - used by Fenrus)
+            # Returns: queue, processing, processed, time, processingFiles
             try:
-                data["system_info"] = await self.get_system_info()
+                status = await self.get_status()
+                data["status"] = status
+                data["processing_files"] = status.get("processingFiles", [])
+                data["processed_count"] = status.get("processed", 0)
             except FileFlowsApiError as err:
-                _LOGGER.debug("Could not get system info: %s", err)
+                _LOGGER.debug("Could not get status: %s", err)
 
-            # Get nodes
+            # Get shrinkage (storage savings)
+            try:
+                data["shrinkage"] = await self.get_shrinkage()
+            except FileFlowsApiError as err:
+                _LOGGER.debug("Could not get shrinkage: %s", err)
+
+            # Get update available
+            try:
+                update_info = await self.get_update_available()
+                data["update_available"] = update_info.get("UpdateAvailable", False)
+            except FileFlowsApiError as err:
+                _LOGGER.debug("Could not get update info: %s", err)
+
+            # Get nodes (may require auth)
             try:
                 data["nodes"] = await self.get_nodes()
             except FileFlowsApiError as err:
                 _LOGGER.debug("Could not get nodes: %s", err)
 
-            # Get libraries
+            # Get libraries (may require auth)
             try:
                 data["libraries"] = await self.get_libraries()
             except FileFlowsApiError as err:
                 _LOGGER.debug("Could not get libraries: %s", err)
 
-            # Get file counts
+            # Get flows (may require auth)
+            try:
+                data["flows"] = await self.get_flows()
+            except FileFlowsApiError as err:
+                _LOGGER.debug("Could not get flows: %s", err)
+
+            # Optional: Get detailed file lists if available
             try:
                 data["unprocessed_files"] = await self.get_unprocessed_files()
             except FileFlowsApiError as err:
                 _LOGGER.debug("Could not get unprocessed files: %s", err)
-
-            try:
-                data["processing_files"] = await self.get_processing_files()
-            except FileFlowsApiError as err:
-                _LOGGER.debug("Could not get processing files: %s", err)
-
-            try:
-                processed = await self.get_processed_files()
-                data["processed_count"] = len(processed) if processed else 0
-            except FileFlowsApiError as err:
-                _LOGGER.debug("Could not get processed files: %s", err)
 
             try:
                 failed = await self.get_failed_files()
@@ -363,29 +392,11 @@ class FileFlowsApi:
             except FileFlowsApiError as err:
                 _LOGGER.debug("Could not get failed files: %s", err)
 
-            # Get statistics
-            try:
-                data["statistics"] = await self.get_statistics()
-            except FileFlowsApiError as err:
-                _LOGGER.debug("Could not get statistics: %s", err)
-
-            # Get shrinkage
-            try:
-                data["shrinkage"] = await self.get_shrinkage()
-            except FileFlowsApiError as err:
-                _LOGGER.debug("Could not get shrinkage: %s", err)
-
-            # Get workers
+            # Get workers (may require auth)
             try:
                 data["workers"] = await self.get_workers()
             except FileFlowsApiError as err:
                 _LOGGER.debug("Could not get workers: %s", err)
-
-            # Get flows
-            try:
-                data["flows"] = await self.get_flows()
-            except FileFlowsApiError as err:
-                _LOGGER.debug("Could not get flows: %s", err)
 
         except Exception as err:
             _LOGGER.error("Error fetching FileFlows data: %s", err)

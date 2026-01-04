@@ -48,6 +48,11 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Error communicating with FileFlows: {err}") from err
 
     @property
+    def status(self) -> dict[str, Any]:
+        """Get status data."""
+        return self.data.get("status", {}) if self.data else {}
+
+    @property
     def system_info(self) -> dict[str, Any]:
         """Get system info."""
         return self.data.get("system_info", {}) if self.data else {}
@@ -88,9 +93,9 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self.data.get("statistics", {}) if self.data else {}
 
     @property
-    def shrinkage(self) -> dict[str, Any]:
+    def shrinkage(self) -> list[dict[str, Any]]:
         """Get shrinkage data."""
-        return self.data.get("shrinkage", {}) if self.data else {}
+        return self.data.get("shrinkage", []) if self.data else []
 
     @property
     def workers(self) -> list[dict[str, Any]]:
@@ -125,7 +130,17 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def storage_saved_bytes(self) -> int:
         """Get total storage saved in bytes."""
-        return self.shrinkage.get("TotalShrinkage", 0)
+        # Sum up all shrinkage groups
+        total = 0
+        for item in self.shrinkage:
+            if item.get("Library") == "###TOTAL###":
+                original = item.get("OriginalSize", 0)
+                final = item.get("FinalSize", 0)
+                return original - final
+            original = item.get("OriginalSize", 0)
+            final = item.get("FinalSize", 0)
+            total += (original - final)
+        return total
 
     @property
     def storage_saved_gb(self) -> float:
@@ -135,10 +150,18 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def storage_saved_percent(self) -> float:
         """Get storage saved percentage."""
-        original = self.shrinkage.get("OriginalSize", 0)
-        if original > 0:
-            saved = self.shrinkage.get("TotalShrinkage", 0)
-            return round((saved / original) * 100, 1)
+        total_original = 0
+        total_final = 0
+        for item in self.shrinkage:
+            if item.get("Library") == "###TOTAL###":
+                total_original = item.get("OriginalSize", 0)
+                total_final = item.get("FinalSize", 0)
+                break
+            total_original += item.get("OriginalSize", 0)
+            total_final += item.get("FinalSize", 0)
+        
+        if total_original > 0:
+            return round(((total_original - total_final) / total_original) * 100, 1)
         return 0.0
 
     @property
@@ -146,15 +169,20 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Get current processing file name."""
         if self.processing_files:
             file = self.processing_files[0]
-            return file.get("Name", file.get("RelativePath", "Unknown"))
+            return file.get("name", file.get("relativePath", "Unknown"))
         return None
 
     @property
     def queue_size(self) -> int:
-        """Get queue size."""
-        return len(self.unprocessed_files)
+        """Get queue size from status."""
+        return self.status.get("queue", len(self.unprocessed_files))
 
     @property
     def version(self) -> str:
         """Get FileFlows version."""
         return self.system_info.get("Version", "Unknown")
+
+    @property
+    def update_available(self) -> bool:
+        """Check if update is available."""
+        return self.data.get("update_available", False) if self.data else False

@@ -35,17 +35,13 @@ class FileFlowsSensorEntityDescription(SensorEntityDescription):
 
 SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
     FileFlowsSensorEntityDescription(
-        key="files_unprocessed",
-        translation_key="files_unprocessed",
-        name="Unprocessed Files",
-        icon="mdi:file-clock-outline",
+        key="queue",
+        translation_key="queue",
+        name="Queue Size",
+        icon="mdi:inbox-full",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="files",
-        value_fn=lambda c: len(c.unprocessed_files),
-        attr_fn=lambda c: {
-            "files": [f.get("Name", f.get("RelativePath", "Unknown"))[:50] for f in c.unprocessed_files[:10]],
-            "queue_position": {f.get("Name", "")[:30]: i + 1 for i, f in enumerate(c.unprocessed_files[:10])},
-        },
+        value_fn=lambda c: c.queue_size,
     ),
     FileFlowsSensorEntityDescription(
         key="files_processing",
@@ -56,12 +52,13 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         native_unit_of_measurement="files",
         value_fn=lambda c: len(c.processing_files),
         attr_fn=lambda c: {
-            "files": [f.get("Name", f.get("RelativePath", "Unknown")) for f in c.processing_files],
+            "files": [f.get("name", f.get("relativePath", "Unknown")) for f in c.processing_files],
             "details": [
                 {
-                    "name": f.get("Name", "Unknown"),
-                    "progress": f.get("ExecutingPercent", 0),
-                    "node": f.get("NodeName", "Unknown"),
+                    "name": f.get("name", "Unknown"),
+                    "step": f.get("step", "Unknown"),
+                    "progress": f.get("stepPercent", 0),
+                    "library": f.get("library", "Unknown"),
                 }
                 for f in c.processing_files
             ],
@@ -86,15 +83,6 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         value_fn=lambda c: c.failed_count,
     ),
     FileFlowsSensorEntityDescription(
-        key="total_files",
-        translation_key="total_files",
-        name="Total Files in Queue",
-        icon="mdi:file-multiple-outline",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="files",
-        value_fn=lambda c: len(c.unprocessed_files) + len(c.processing_files),
-    ),
-    FileFlowsSensorEntityDescription(
         key="storage_saved",
         translation_key="storage_saved",
         name="Storage Saved",
@@ -105,8 +93,14 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         value_fn=lambda c: c.storage_saved_gb,
         attr_fn=lambda c: {
             "bytes_saved": c.storage_saved_bytes,
-            "original_size_bytes": c.shrinkage.get("OriginalSize", 0),
-            "final_size_bytes": c.shrinkage.get("FinalSize", 0),
+            "shrinkage_groups": [
+                {
+                    "library": s.get("Library", "Unknown"),
+                    "original_size": s.get("OriginalSize", 0),
+                    "final_size": s.get("FinalSize", 0),
+                }
+                for s in c.shrinkage if s.get("Library") != "###TOTAL###"
+            ],
         },
     ),
     FileFlowsSensorEntityDescription(
@@ -120,58 +114,23 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         value_fn=lambda c: c.storage_saved_percent,
     ),
     FileFlowsSensorEntityDescription(
-        key="active_runners",
-        translation_key="active_runners",
-        name="Active Runners",
-        icon="mdi:run-fast",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="runners",
-        value_fn=lambda c: c.active_runners,
-        attr_fn=lambda c: {
-            "total_runners": c.total_runners,
-            "workers": [
-                {
-                    "node": w.get("NodeName", "Unknown"),
-                    "status": w.get("Status", "Unknown"),
-                    "file": w.get("CurrentFile", "None"),
-                }
-                for w in c.workers
-            ],
-        },
-    ),
-    FileFlowsSensorEntityDescription(
-        key="total_runners",
-        translation_key="total_runners",
-        name="Total Runners",
-        icon="mdi:account-group",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="runners",
-        value_fn=lambda c: c.total_runners,
-    ),
-    FileFlowsSensorEntityDescription(
         key="current_file",
         translation_key="current_file",
         name="Current Processing File",
         icon="mdi:file-video-outline",
         value_fn=lambda c: c.current_file_name or "None",
         attr_fn=lambda c: {
-            "progress": c.processing_files[0].get("ExecutingPercent", 0) if c.processing_files else 0,
-            "node": c.processing_files[0].get("NodeName", "Unknown") if c.processing_files else "None",
-            "flow": c.processing_files[0].get("FlowName", "Unknown") if c.processing_files else "None",
-            "started": c.processing_files[0].get("ProcessingStarted", "") if c.processing_files else "",
+            "step": c.processing_files[0].get("step", "Unknown") if c.processing_files else "None",
+            "progress": c.processing_files[0].get("stepPercent", 0) if c.processing_files else 0,
+            "library": c.processing_files[0].get("library", "Unknown") if c.processing_files else "None",
         },
     ),
     FileFlowsSensorEntityDescription(
-        key="version",
-        translation_key="version",
-        name="FileFlows Version",
-        icon="mdi:tag-outline",
-        value_fn=lambda c: c.version,
-        attr_fn=lambda c: {
-            "is_licensed": c.system_info.get("IsLicensed", False),
-            "license_level": c.system_info.get("LicenseLevel", "Free"),
-            "database_type": c.system_info.get("DbType", "Unknown"),
-        },
+        key="processing_time",
+        translation_key="processing_time",
+        name="Processing Time",
+        icon="mdi:timer-outline",
+        value_fn=lambda c: c.status.get("time", "N/A"),
     ),
     FileFlowsSensorEntityDescription(
         key="nodes_count",
@@ -184,10 +143,8 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         attr_fn=lambda c: {
             "nodes": [
                 {
-                    "name": n.get("Name", "Unknown"),
-                    "enabled": n.get("Enabled", False),
-                    "runners": n.get("FlowRunners", 0),
-                    "address": n.get("Address", "Unknown"),
+                    "name": n.get("Name", n.get("name", "Unknown")),
+                    "enabled": n.get("Enabled", n.get("enabled", False)),
                 }
                 for n in c.nodes
             ],
@@ -204,10 +161,8 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         attr_fn=lambda c: {
             "libraries": [
                 {
-                    "name": lib.get("Name", "Unknown"),
-                    "enabled": lib.get("Enabled", False),
-                    "path": lib.get("Path", "Unknown"),
-                    "flow": lib.get("Flow", {}).get("Name", "Unknown") if lib.get("Flow") else "None",
+                    "name": lib.get("Name", lib.get("name", "Unknown")),
+                    "path": lib.get("Path", lib.get("path", "Unknown")),
                 }
                 for lib in c.libraries
             ],
@@ -222,7 +177,7 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         native_unit_of_measurement="flows",
         value_fn=lambda c: len(c.flows),
         attr_fn=lambda c: {
-            "flows": [f.get("Name", "Unknown") for f in c.flows],
+            "flows": [f.get("Name", f.get("name", "Unknown")) for f in c.flows],
         },
     ),
 )
