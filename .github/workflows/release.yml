@@ -1,0 +1,23 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Create ZIP
+        run: |
+          cd custom_components
+          zip -r ../fileflows.zip fileflows/
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: fileflows.zip
+          generate_release_notes: true
