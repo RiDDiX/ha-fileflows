@@ -1,0 +1,55 @@
+pause_system:
+  name: Pause System
+  description: Pause the FileFlows processing system. No new files will be processed until resumed.
+
+resume_system:
+  name: Resume System
+  description: Resume the FileFlows processing system. Files will start processing again.
+
+enable_node:
+  name: Enable Node
+  description: Enable a processing node so it can process files.
+  fields:
+    node_uid:
+      name: Node UID
+      description: The unique identifier of the node to enable.
+      required: true
+      example: "550e8400-e29b-41d4-a716-446655440000"
+      selector:
+        text:
+
+disable_node:
+  name: Disable Node
+  description: Disable a processing node so it stops processing files.
+  fields:
+    node_uid:
+      name: Node UID
+      description: The unique identifier of the node to disable.
+      required: true
+      example: "550e8400-e29b-41d4-a716-446655440000"
+      selector:
+        text:
+
+rescan_library:
+  name: Rescan Library
+  description: Rescan a library to find new or changed files.
+  fields:
+    library_uid:
+      name: Library UID
+      description: The unique identifier of the library to rescan.
+      required: true
+      example: "550e8400-e29b-41d4-a716-446655440000"
+      selector:
+        text:
+
+reprocess_file:
+  name: Reprocess File
+  description: Queue a file for reprocessing.
+  fields:
+    file_uid:
+      name: File UID
+      description: The unique identifier of the file to reprocess.
+      required: true
+      example: "550e8400-e29b-41d4-a716-446655440000"
+      selector:
+        text:

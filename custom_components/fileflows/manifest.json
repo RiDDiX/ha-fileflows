@@ -1,0 +1,12 @@
+{
+  "domain": "fileflows",
+  "name": "FileFlows",
+  "codeowners": ["@RiDDiX"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/RiDDiX/ha-fileflows",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/RiDDiX/ha-fileflows/issues",
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "1.0.0"
+}

@@ -1,0 +1,171 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FileFlows Connection",
+        "description": "Enter the connection details for your FileFlows server.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "ssl": "Use SSL",
+          "verify_ssl": "Verify SSL Certificate",
+          "access_token": "Access Token (optional)"
+        },
+        "data_description": {
+          "host": "The hostname or IP address of your FileFlows server",
+          "port": "The port number (default: 19200)",
+          "ssl": "Enable if using HTTPS",
+          "verify_ssl": "Verify the SSL certificate",
+          "access_token": "Access token if authentication is enabled"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to FileFlows server",
+      "invalid_auth": "Invalid authentication credentials",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This FileFlows server is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FileFlows Options",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "files_unprocessed": {
+        "name": "Unprocessed Files"
+      },
+      "files_processing": {
+        "name": "Processing Files"
+      },
+      "files_processed": {
+        "name": "Processed Files"
+      },
+      "files_failed": {
+        "name": "Failed Files"
+      },
+      "total_files": {
+        "name": "Total Files in Queue"
+      },
+      "storage_saved": {
+        "name": "Storage Saved"
+      },
+      "storage_saved_percent": {
+        "name": "Storage Saved Percentage"
+      },
+      "active_runners": {
+        "name": "Active Runners"
+      },
+      "total_runners": {
+        "name": "Total Runners"
+      },
+      "current_file": {
+        "name": "Current Processing File"
+      },
+      "version": {
+        "name": "FileFlows Version"
+      },
+      "nodes_count": {
+        "name": "Processing Nodes"
+      },
+      "libraries_count": {
+        "name": "Libraries"
+      },
+      "flows_count": {
+        "name": "Flows"
+      }
+    },
+    "binary_sensor": {
+      "system_paused": {
+        "name": "System Paused"
+      },
+      "processing_active": {
+        "name": "Processing Active"
+      },
+      "has_failed_files": {
+        "name": "Has Failed Files"
+      },
+      "queue_not_empty": {
+        "name": "Queue Has Files"
+      },
+      "all_nodes_enabled": {
+        "name": "All Nodes Enabled"
+      }
+    },
+    "button": {
+      "pause_system": {
+        "name": "Pause System"
+      },
+      "resume_system": {
+        "name": "Resume System"
+      },
+      "refresh_data": {
+        "name": "Refresh Data"
+      }
+    },
+    "switch": {
+      "system_active": {
+        "name": "System Active"
+      }
+    }
+  },
+  "services": {
+    "pause_system": {
+      "name": "Pause System",
+      "description": "Pause the FileFlows processing system"
+    },
+    "resume_system": {
+      "name": "Resume System",
+      "description": "Resume the FileFlows processing system"
+    },
+    "enable_node": {
+      "name": "Enable Node",
+      "description": "Enable a processing node",
+      "fields": {
+        "node_uid": {
+          "name": "Node UID",
+          "description": "The unique identifier of the node to enable"
+        }
+      }
+    },
+    "disable_node": {
+      "name": "Disable Node",
+      "description": "Disable a processing node",
+      "fields": {
+        "node_uid": {
+          "name": "Node UID",
+          "description": "The unique identifier of the node to disable"
+        }
+      }
+    },
+    "rescan_library": {
+      "name": "Rescan Library",
+      "description": "Rescan a library for new files",
+      "fields": {
+        "library_uid": {
+          "name": "Library UID",
+          "description": "The unique identifier of the library to rescan"
+        }
+      }
+    },
+    "reprocess_file": {
+      "name": "Reprocess File",
+      "description": "Reprocess a specific file",
+      "fields": {
+        "file_uid": {
+          "name": "File UID",
+          "description": "The unique identifier of the file to reprocess"
+        }
+      }
+    }
+  }
+}
