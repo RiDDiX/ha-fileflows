@@ -60,7 +60,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
 
     try:
-        system_info = await api.get_system_info()
+        # Test connection with status endpoint
+        if not await api.test_connection():
+            raise CannotConnect("Connection test failed")
+        # Get version info
+        version = await api.get_version()
     except FileFlowsAuthError as err:
         raise InvalidAuth from err
     except FileFlowsConnectionError as err:
@@ -68,7 +72,6 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     except FileFlowsApiError as err:
         raise CannotConnect from err
 
-    version = system_info.get("Version", "Unknown")
     return {"title": f"FileFlows ({data[CONF_HOST]})", "version": version}
 
 

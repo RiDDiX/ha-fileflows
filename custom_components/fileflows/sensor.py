@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, UnitOfInformation
+from homeassistant.const import CONF_HOST, PERCENTAGE, UnitOfInformation, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,15 +33,34 @@ class FileFlowsSensorEntityDescription(SensorEntityDescription):
     attr_fn: Callable[[FileFlowsDataUpdateCoordinator], dict[str, Any]] | None = None
 
 
+# =============================================================================
+# Sensor Definitions
+# =============================================================================
 SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
+    # -------------------------------------------------------------------------
+    # Queue & Processing Sensors
+    # -------------------------------------------------------------------------
     FileFlowsSensorEntityDescription(
-        key="queue",
-        translation_key="queue",
+        key="queue_size",
+        translation_key="queue_size",
         name="Queue Size",
         icon="mdi:inbox-full",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="files",
         value_fn=lambda c: c.queue_size,
+        attr_fn=lambda c: {
+            "unprocessed": c.files_unprocessed,
+            "processing": c.files_processing,
+        },
+    ),
+    FileFlowsSensorEntityDescription(
+        key="files_unprocessed",
+        translation_key="files_unprocessed",
+        name="Unprocessed Files",
+        icon="mdi:file-clock-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="files",
+        value_fn=lambda c: c.files_unprocessed,
     ),
     FileFlowsSensorEntityDescription(
         key="files_processing",
@@ -50,17 +69,15 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         icon="mdi:file-sync-outline",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="files",
-        value_fn=lambda c: len(c.processing_files),
+        value_fn=lambda c: c.files_processing,
         attr_fn=lambda c: {
-            "files": [f.get("name", f.get("relativePath", "Unknown")) for f in c.processing_files],
-            "details": [
+            "workers": [
                 {
-                    "name": f.get("name", "Unknown"),
-                    "step": f.get("step", "Unknown"),
-                    "progress": f.get("stepPercent", 0),
-                    "library": f.get("library", "Unknown"),
+                    "file": w.get("LibraryFile", {}).get("Name", w.get("CurrentFile", "Unknown")),
+                    "node": w.get("NodeName", "Unknown"),
+                    "flow": w.get("FlowName", "Unknown"),
                 }
-                for f in c.processing_files
+                for w in c.workers
             ],
         },
     ),
@@ -71,7 +88,7 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         icon="mdi:file-check-outline",
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement="files",
-        value_fn=lambda c: c.processed_count,
+        value_fn=lambda c: c.files_processed,
     ),
     FileFlowsSensorEntityDescription(
         key="files_failed",
@@ -80,26 +97,84 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         icon="mdi:file-alert-outline",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="files",
-        value_fn=lambda c: c.failed_count,
+        value_fn=lambda c: c.files_failed,
     ),
+    FileFlowsSensorEntityDescription(
+        key="files_on_hold",
+        translation_key="files_on_hold",
+        name="Files On Hold",
+        icon="mdi:file-clock",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="files",
+        value_fn=lambda c: c.files_on_hold,
+    ),
+    FileFlowsSensorEntityDescription(
+        key="files_out_of_schedule",
+        translation_key="files_out_of_schedule",
+        name="Files Out of Schedule",
+        icon="mdi:file-cancel-outline",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="files",
+        value_fn=lambda c: c.files_out_of_schedule,
+    ),
+    # -------------------------------------------------------------------------
+    # Current Processing
+    # -------------------------------------------------------------------------
+    FileFlowsSensorEntityDescription(
+        key="current_file",
+        translation_key="current_file",
+        name="Current File",
+        icon="mdi:file-video-outline",
+        value_fn=lambda c: c.current_file or "Idle",
+        attr_fn=lambda c: {
+            "workers_count": c.active_workers,
+            "details": [
+                {
+                    "file": w.get("LibraryFile", {}).get("Name", w.get("CurrentFile", "Unknown")),
+                    "node": w.get("NodeName", "Unknown"),
+                    "flow": w.get("FlowName", "Unknown"),
+                    "step": w.get("CurrentPartName", "Unknown"),
+                    "progress": w.get("CurrentPartPercent", 0),
+                }
+                for w in c.workers
+            ] if c.workers else [],
+        },
+    ),
+    FileFlowsSensorEntityDescription(
+        key="active_workers",
+        translation_key="active_workers",
+        name="Active Workers",
+        icon="mdi:run-fast",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="workers",
+        value_fn=lambda c: c.active_workers,
+        attr_fn=lambda c: {
+            "total_runners": c.total_runners,
+        },
+    ),
+    # -------------------------------------------------------------------------
+    # Storage Savings
+    # -------------------------------------------------------------------------
     FileFlowsSensorEntityDescription(
         key="storage_saved",
         translation_key="storage_saved",
         name="Storage Saved",
         icon="mdi:harddisk",
+        device_class=SensorDeviceClass.DATA_SIZE,
         state_class=SensorStateClass.TOTAL_INCREASING,
-        native_unit_of_measurement="GB",
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
         suggested_display_precision=2,
         value_fn=lambda c: c.storage_saved_gb,
         attr_fn=lambda c: {
             "bytes_saved": c.storage_saved_bytes,
-            "shrinkage_groups": [
+            "by_library": [
                 {
                     "library": s.get("Library", "Unknown"),
-                    "original_size": s.get("OriginalSize", 0),
-                    "final_size": s.get("FinalSize", 0),
+                    "original_gb": round(s.get("OriginalSize", 0) / (1024**3), 2),
+                    "final_gb": round(s.get("FinalSize", 0) / (1024**3), 2),
+                    "saved_gb": round((s.get("OriginalSize", 0) - s.get("FinalSize", 0)) / (1024**3), 2),
                 }
-                for s in c.shrinkage if s.get("Library") != "###TOTAL###"
+                for s in c.shrinkage_groups
             ],
         },
     ),
@@ -109,29 +184,63 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         name="Storage Saved Percentage",
         icon="mdi:percent",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="%",
+        native_unit_of_measurement=PERCENTAGE,
         suggested_display_precision=1,
         value_fn=lambda c: c.storage_saved_percent,
     ),
+    # -------------------------------------------------------------------------
+    # System Resources
+    # -------------------------------------------------------------------------
     FileFlowsSensorEntityDescription(
-        key="current_file",
-        translation_key="current_file",
-        name="Current Processing File",
-        icon="mdi:file-video-outline",
-        value_fn=lambda c: c.current_file_name or "None",
+        key="cpu_usage",
+        translation_key="cpu_usage",
+        name="CPU Usage",
+        icon="mdi:cpu-64-bit",
+        device_class=SensorDeviceClass.POWER_FACTOR,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1,
+        value_fn=lambda c: c.cpu_usage,
+    ),
+    FileFlowsSensorEntityDescription(
+        key="memory_usage",
+        translation_key="memory_usage",
+        name="Memory Usage",
+        icon="mdi:memory",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1,
+        value_fn=lambda c: c.memory_usage,
         attr_fn=lambda c: {
-            "step": c.processing_files[0].get("step", "Unknown") if c.processing_files else "None",
-            "progress": c.processing_files[0].get("stepPercent", 0) if c.processing_files else 0,
-            "library": c.processing_files[0].get("library", "Unknown") if c.processing_files else "None",
+            "used_mb": round(c.memory_used_mb, 0),
+            "total_mb": round(c.memory_total_mb, 0),
         },
     ),
     FileFlowsSensorEntityDescription(
-        key="processing_time",
-        translation_key="processing_time",
-        name="Processing Time",
-        icon="mdi:timer-outline",
-        value_fn=lambda c: c.status.get("time", "N/A"),
+        key="temp_directory_size",
+        translation_key="temp_directory_size",
+        name="Temp Directory Size",
+        icon="mdi:folder-clock",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        suggested_display_precision=2,
+        value_fn=lambda c: c.temp_directory_size_gb,
     ),
+    FileFlowsSensorEntityDescription(
+        key="log_directory_size",
+        translation_key="log_directory_size",
+        name="Log Directory Size",
+        icon="mdi:folder-text",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        suggested_display_precision=2,
+        value_fn=lambda c: c.log_directory_size_gb,
+    ),
+    # -------------------------------------------------------------------------
+    # Counts
+    # -------------------------------------------------------------------------
     FileFlowsSensorEntityDescription(
         key="nodes_count",
         translation_key="nodes_count",
@@ -139,12 +248,16 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         icon="mdi:server-network",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="nodes",
-        value_fn=lambda c: len(c.nodes),
+        value_fn=lambda c: c.nodes_count,
         attr_fn=lambda c: {
+            "enabled": c.enabled_nodes_count,
+            "total_runners": c.total_runners,
             "nodes": [
                 {
-                    "name": n.get("Name", n.get("name", "Unknown")),
-                    "enabled": n.get("Enabled", n.get("enabled", False)),
+                    "name": n.get("Name", "Unknown"),
+                    "enabled": n.get("Enabled", False),
+                    "runners": n.get("FlowRunners", 0),
+                    "address": n.get("Address", "Unknown"),
                 }
                 for n in c.nodes
             ],
@@ -154,15 +267,17 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         key="libraries_count",
         translation_key="libraries_count",
         name="Libraries",
-        icon="mdi:folder-multiple-outline",
+        icon="mdi:folder-multiple",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="libraries",
-        value_fn=lambda c: len(c.libraries),
+        value_fn=lambda c: c.libraries_count,
         attr_fn=lambda c: {
+            "enabled": c.enabled_libraries_count,
             "libraries": [
                 {
-                    "name": lib.get("Name", lib.get("name", "Unknown")),
-                    "path": lib.get("Path", lib.get("path", "Unknown")),
+                    "name": lib.get("Name", "Unknown"),
+                    "enabled": lib.get("Enabled", False),
+                    "path": lib.get("Path", "Unknown"),
                 }
                 for lib in c.libraries
             ],
@@ -172,13 +287,161 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         key="flows_count",
         translation_key="flows_count",
         name="Flows",
-        icon="mdi:sitemap-outline",
+        icon="mdi:sitemap",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="flows",
-        value_fn=lambda c: len(c.flows),
+        value_fn=lambda c: c.flows_count,
         attr_fn=lambda c: {
-            "flows": [f.get("Name", f.get("name", "Unknown")) for f in c.flows],
+            "enabled": c.enabled_flows_count,
+            "flows": [
+                {
+                    "name": f.get("Name", "Unknown"),
+                    "enabled": f.get("Enabled", False),
+                    "type": f.get("Type", "Unknown"),
+                }
+                for f in c.flows
+            ],
         },
+    ),
+    FileFlowsSensorEntityDescription(
+        key="plugins_count",
+        translation_key="plugins_count",
+        name="Plugins",
+        icon="mdi:puzzle",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="plugins",
+        value_fn=lambda c: c.plugins_count,
+        attr_fn=lambda c: {
+            "enabled": c.enabled_plugins_count,
+            "plugins": [p.get("Name", "Unknown") for p in c.plugins[:20]],
+        },
+    ),
+    FileFlowsSensorEntityDescription(
+        key="tasks_count",
+        translation_key="tasks_count",
+        name="Scheduled Tasks",
+        icon="mdi:calendar-clock",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="tasks",
+        value_fn=lambda c: c.tasks_count,
+        attr_fn=lambda c: {
+            "tasks": [
+                {
+                    "name": t.get("Name", "Unknown"),
+                    "type": t.get("Type", "Unknown"),
+                }
+                for t in c.tasks
+            ],
+        },
+    ),
+    # -------------------------------------------------------------------------
+    # Version & Updates
+    # -------------------------------------------------------------------------
+    FileFlowsSensorEntityDescription(
+        key="version",
+        translation_key="version",
+        name="Version",
+        icon="mdi:tag-outline",
+        value_fn=lambda c: c.version,
+        attr_fn=lambda c: {
+            "update_available": c.update_available,
+        },
+    ),
+    # -------------------------------------------------------------------------
+    # Recent Activity
+    # -------------------------------------------------------------------------
+    FileFlowsSensorEntityDescription(
+        key="upcoming_count",
+        translation_key="upcoming_count",
+        name="Upcoming Files",
+        icon="mdi:playlist-play",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="files",
+        value_fn=lambda c: len(c.upcoming_files),
+        attr_fn=lambda c: {
+            "files": [
+                {
+                    "name": f.get("Name", f.get("RelativePath", "Unknown")),
+                    "library": f.get("LibraryName", "Unknown"),
+                }
+                for f in c.upcoming_files[:10]
+            ],
+        },
+    ),
+    FileFlowsSensorEntityDescription(
+        key="recently_finished_count",
+        translation_key="recently_finished_count",
+        name="Recently Finished",
+        icon="mdi:playlist-check",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="files",
+        value_fn=lambda c: len(c.recently_finished),
+        attr_fn=lambda c: {
+            "files": [
+                {
+                    "name": f.get("Name", f.get("RelativePath", "Unknown")),
+                    "library": f.get("LibraryName", "Unknown"),
+                }
+                for f in c.recently_finished[:10]
+            ],
+        },
+    ),
+)
+
+# =============================================================================
+# NVIDIA Sensor Definitions (separate, only created if NVIDIA present)
+# =============================================================================
+NVIDIA_SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
+    FileFlowsSensorEntityDescription(
+        key="nvidia_gpu_usage",
+        translation_key="nvidia_gpu_usage",
+        name="NVIDIA GPU Usage",
+        icon="mdi:expansion-card",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1,
+        value_fn=lambda c: c.nvidia_gpu_usage,
+    ),
+    FileFlowsSensorEntityDescription(
+        key="nvidia_memory_usage",
+        translation_key="nvidia_memory_usage",
+        name="NVIDIA Memory Usage",
+        icon="mdi:memory",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1,
+        value_fn=lambda c: c.nvidia_memory_usage,
+    ),
+    FileFlowsSensorEntityDescription(
+        key="nvidia_encoder_usage",
+        translation_key="nvidia_encoder_usage",
+        name="NVIDIA Encoder Usage",
+        icon="mdi:video-box",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1,
+        value_fn=lambda c: c.nvidia_encoder_usage,
+    ),
+    FileFlowsSensorEntityDescription(
+        key="nvidia_decoder_usage",
+        translation_key="nvidia_decoder_usage",
+        name="NVIDIA Decoder Usage",
+        icon="mdi:video-input-component",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=1,
+        value_fn=lambda c: c.nvidia_decoder_usage,
+    ),
+    FileFlowsSensorEntityDescription(
+        key="nvidia_temperature",
+        translation_key="nvidia_temperature",
+        name="NVIDIA Temperature",
+        icon="mdi:thermometer",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=0,
+        value_fn=lambda c: c.nvidia_temperature,
     ),
 )
 
@@ -189,62 +452,20 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up FileFlows sensors."""
-    coordinator: FileFlowsDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator: FileFlowsDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities: list[FileFlowsSensor] = []
 
+    # Add main sensors
     for description in SENSOR_DESCRIPTIONS:
-        entities.append(FileFlowsSensor(coordinator, description, entry))
+        entities.append(FileFlowsSensor(coordinator, entry, description))
 
-    # Add node-specific sensors
-    if coordinator.nodes:
-        for node in coordinator.nodes:
-            node_uid = node.get("Uid", "")
-            node_name = node.get("Name", "Unknown")
-            entities.append(
-                FileFlowsNodeSensor(
-                    coordinator,
-                    FileFlowsSensorEntityDescription(
-                        key=f"node_{node_uid}_status",
-                        name=f"Node {node_name} Status",
-                        icon="mdi:server",
-                        value_fn=lambda c, uid=node_uid: _get_node_status(c, uid),
-                        attr_fn=lambda c, uid=node_uid: _get_node_attrs(c, uid),
-                    ),
-                    entry,
-                    node_uid,
-                    node_name,
-                )
-            )
+    # Add NVIDIA sensors if available
+    if coordinator.has_nvidia:
+        for description in NVIDIA_SENSOR_DESCRIPTIONS:
+            entities.append(FileFlowsSensor(coordinator, entry, description))
 
     async_add_entities(entities)
-
-
-def _get_node_status(coordinator: FileFlowsDataUpdateCoordinator, node_uid: str) -> str:
-    """Get node status."""
-    for node in coordinator.nodes:
-        if node.get("Uid") == node_uid:
-            if not node.get("Enabled", False):
-                return "Disabled"
-            return "Enabled"
-    return "Unknown"
-
-
-def _get_node_attrs(coordinator: FileFlowsDataUpdateCoordinator, node_uid: str) -> dict[str, Any]:
-    """Get node attributes."""
-    for node in coordinator.nodes:
-        if node.get("Uid") == node_uid:
-            return {
-                "uid": node.get("Uid", ""),
-                "address": node.get("Address", ""),
-                "enabled": node.get("Enabled", False),
-                "runners": node.get("FlowRunners", 0),
-                "priority": node.get("Priority", 0),
-                "version": node.get("Version", "Unknown"),
-                "operating_system": node.get("OperatingSystem", "Unknown"),
-                "architecture": node.get("Architecture", "Unknown"),
-            }
-    return {}
 
 
 class FileFlowsSensor(CoordinatorEntity[FileFlowsDataUpdateCoordinator], SensorEntity):
@@ -256,8 +477,8 @@ class FileFlowsSensor(CoordinatorEntity[FileFlowsDataUpdateCoordinator], SensorE
     def __init__(
         self,
         coordinator: FileFlowsDataUpdateCoordinator,
-        description: FileFlowsSensorEntityDescription,
         entry: ConfigEntry,
+        description: FileFlowsSensorEntityDescription,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -265,39 +486,29 @@ class FileFlowsSensor(CoordinatorEntity[FileFlowsDataUpdateCoordinator], SensorE
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data[CONF_HOST]})",
+            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data[CONF_HOST]}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
         )
 
     @property
     def native_value(self) -> Any:
         """Return the state of the sensor."""
-        return self.entity_description.value_fn(self.coordinator)
+        try:
+            return self.entity_description.value_fn(self.coordinator)
+        except Exception as err:
+            _LOGGER.debug("Error getting value for %s: %s", self.entity_description.key, err)
+            return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return the state attributes."""
-        if self.entity_description.attr_fn:
+        """Return additional state attributes."""
+        if self.entity_description.attr_fn is None:
+            return None
+        try:
             return self.entity_description.attr_fn(self.coordinator)
-        return None
-
-
-class FileFlowsNodeSensor(FileFlowsSensor):
-    """Representation of a FileFlows node sensor."""
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        description: FileFlowsSensorEntityDescription,
-        entry: ConfigEntry,
-        node_uid: str,
-        node_name: str,
-    ) -> None:
-        """Initialize the node sensor."""
-        super().__init__(coordinator, description, entry)
-        self._node_uid = node_uid
-        self._node_name = node_name
-        self._attr_unique_id = f"{entry.entry_id}_node_{node_uid}"
+        except Exception as err:
+            _LOGGER.debug("Error getting attributes for %s: %s", self.entity_description.key, err)
+            return None

@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "FileFlows Connection",
-        "description": "Enter the connection details for your FileFlows server.",
+        "title": "Connect to FileFlows",
+        "description": "Enter your FileFlows server details",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -12,18 +12,18 @@
           "access_token": "Access Token (optional)"
         },
         "data_description": {
-          "host": "The hostname or IP address of your FileFlows server",
-          "port": "The port number (default: 19200)",
+          "host": "IP address or hostname of your FileFlows server",
+          "port": "Port number (default: 19200)",
           "ssl": "Enable if using HTTPS",
-          "verify_ssl": "Verify the SSL certificate",
-          "access_token": "Access token if authentication is enabled"
+          "verify_ssl": "Verify SSL certificate (disable for self-signed)",
+          "access_token": "API access token if authentication is enabled"
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to FileFlows server",
-      "invalid_auth": "Invalid authentication credentials",
-      "unknown": "Unexpected error occurred"
+      "cannot_connect": "Failed to connect to FileFlows",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
     },
     "abort": {
       "already_configured": "This FileFlows server is already configured"
@@ -41,6 +41,9 @@
   },
   "entity": {
     "sensor": {
+      "queue_size": {
+        "name": "Queue Size"
+      },
       "files_unprocessed": {
         "name": "Unprocessed Files"
       },
@@ -53,8 +56,17 @@
       "files_failed": {
         "name": "Failed Files"
       },
-      "total_files": {
-        "name": "Total Files in Queue"
+      "files_on_hold": {
+        "name": "Files On Hold"
+      },
+      "files_out_of_schedule": {
+        "name": "Files Out of Schedule"
+      },
+      "current_file": {
+        "name": "Current File"
+      },
+      "active_workers": {
+        "name": "Active Workers"
       },
       "storage_saved": {
         "name": "Storage Saved"
@@ -62,17 +74,17 @@
       "storage_saved_percent": {
         "name": "Storage Saved Percentage"
       },
-      "active_runners": {
-        "name": "Active Runners"
+      "cpu_usage": {
+        "name": "CPU Usage"
       },
-      "total_runners": {
-        "name": "Total Runners"
+      "memory_usage": {
+        "name": "Memory Usage"
       },
-      "current_file": {
-        "name": "Current Processing File"
+      "temp_directory_size": {
+        "name": "Temp Directory Size"
       },
-      "version": {
-        "name": "FileFlows Version"
+      "log_directory_size": {
+        "name": "Log Directory Size"
       },
       "nodes_count": {
         "name": "Processing Nodes"
@@ -82,6 +94,36 @@
       },
       "flows_count": {
         "name": "Flows"
+      },
+      "plugins_count": {
+        "name": "Plugins"
+      },
+      "tasks_count": {
+        "name": "Scheduled Tasks"
+      },
+      "version": {
+        "name": "Version"
+      },
+      "upcoming_count": {
+        "name": "Upcoming Files"
+      },
+      "recently_finished_count": {
+        "name": "Recently Finished"
+      },
+      "nvidia_gpu_usage": {
+        "name": "NVIDIA GPU Usage"
+      },
+      "nvidia_memory_usage": {
+        "name": "NVIDIA Memory Usage"
+      },
+      "nvidia_encoder_usage": {
+        "name": "NVIDIA Encoder Usage"
+      },
+      "nvidia_decoder_usage": {
+        "name": "NVIDIA Decoder Usage"
+      },
+      "nvidia_temperature": {
+        "name": "NVIDIA Temperature"
       }
     },
     "binary_sensor": {
@@ -94,38 +136,35 @@
       "has_failed_files": {
         "name": "Has Failed Files"
       },
+      "has_files_on_hold": {
+        "name": "Has Files On Hold"
+      },
       "queue_not_empty": {
-        "name": "Queue Has Files"
+        "name": "Queue Not Empty"
+      },
+      "update_available": {
+        "name": "Update Available"
       },
       "all_nodes_enabled": {
         "name": "All Nodes Enabled"
-      }
-    },
-    "button": {
-      "pause_system": {
-        "name": "Pause System"
       },
-      "resume_system": {
-        "name": "Resume System"
-      },
-      "refresh_data": {
-        "name": "Refresh Data"
-      }
-    },
-    "switch": {
-      "system_active": {
-        "name": "System Active"
+      "has_nvidia": {
+        "name": "NVIDIA Available"
       }
     }
   },
   "services": {
     "pause_system": {
       "name": "Pause System",
-      "description": "Pause the FileFlows processing system"
+      "description": "Pause FileFlows processing"
     },
     "resume_system": {
       "name": "Resume System",
-      "description": "Resume the FileFlows processing system"
+      "description": "Resume FileFlows processing"
+    },
+    "restart_system": {
+      "name": "Restart System",
+      "description": "Restart the FileFlows server"
     },
     "enable_node": {
       "name": "Enable Node",
@@ -133,7 +172,7 @@
       "fields": {
         "node_uid": {
           "name": "Node UID",
-          "description": "The unique identifier of the node to enable"
+          "description": "The UID of the node"
         }
       }
     },
@@ -143,7 +182,27 @@
       "fields": {
         "node_uid": {
           "name": "Node UID",
-          "description": "The unique identifier of the node to disable"
+          "description": "The UID of the node"
+        }
+      }
+    },
+    "enable_library": {
+      "name": "Enable Library",
+      "description": "Enable a library",
+      "fields": {
+        "library_uid": {
+          "name": "Library UID",
+          "description": "The UID of the library"
+        }
+      }
+    },
+    "disable_library": {
+      "name": "Disable Library",
+      "description": "Disable a library",
+      "fields": {
+        "library_uid": {
+          "name": "Library UID",
+          "description": "The UID of the library"
         }
       }
     },
@@ -153,17 +212,81 @@
       "fields": {
         "library_uid": {
           "name": "Library UID",
-          "description": "The unique identifier of the library to rescan"
+          "description": "The UID of the library"
+        }
+      }
+    },
+    "rescan_all_libraries": {
+      "name": "Rescan All Libraries",
+      "description": "Rescan all enabled libraries"
+    },
+    "enable_flow": {
+      "name": "Enable Flow",
+      "description": "Enable a flow",
+      "fields": {
+        "flow_uid": {
+          "name": "Flow UID",
+          "description": "The UID of the flow"
+        }
+      }
+    },
+    "disable_flow": {
+      "name": "Disable Flow",
+      "description": "Disable a flow",
+      "fields": {
+        "flow_uid": {
+          "name": "Flow UID",
+          "description": "The UID of the flow"
         }
       }
     },
     "reprocess_file": {
       "name": "Reprocess File",
-      "description": "Reprocess a specific file",
+      "description": "Reprocess a library file",
       "fields": {
         "file_uid": {
           "name": "File UID",
-          "description": "The unique identifier of the file to reprocess"
+          "description": "The UID of the file"
+        }
+      }
+    },
+    "force_processing": {
+      "name": "Force Processing",
+      "description": "Force processing of files",
+      "fields": {
+        "file_uid": {
+          "name": "File UID(s)",
+          "description": "The UID(s) of the file(s)"
+        }
+      }
+    },
+    "unhold_files": {
+      "name": "Unhold Files",
+      "description": "Unhold library files",
+      "fields": {
+        "file_uid": {
+          "name": "File UID(s)",
+          "description": "The UID(s) of the file(s)"
+        }
+      }
+    },
+    "abort_worker": {
+      "name": "Abort Worker",
+      "description": "Abort a running worker",
+      "fields": {
+        "worker_uid": {
+          "name": "Worker UID",
+          "description": "The UID of the worker"
+        }
+      }
+    },
+    "run_task": {
+      "name": "Run Task",
+      "description": "Run a scheduled task",
+      "fields": {
+        "task_uid": {
+          "name": "Task UID",
+          "description": "The UID of the task"
         }
       }
     }
