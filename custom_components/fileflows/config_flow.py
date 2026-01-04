@@ -60,7 +60,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
 
     try:
-        # Test connection with status endpoint
+        # Test connection with public remote/info/status endpoint (no auth required)
         if not await api.test_connection():
             raise CannotConnect("Connection test failed")
         # Get version info

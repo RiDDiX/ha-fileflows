@@ -8,53 +8,44 @@ from typing import Any
 import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientTimeout
 
-from .const import (
-    API_DASHBOARD,
-    API_DASHBOARD_LIST,
-    API_FLOWS,
-    API_FLOW_BY_UID,
-    API_FLOW_STATE,
-    API_LIBRARIES,
-    API_LIBRARY_BY_UID,
-    API_LIBRARY_FILE_REPROCESS,
-    API_LIBRARY_FILE_RECENTLY_FINISHED,
-    API_LIBRARY_FILE_SHRINKAGE_GROUPS,
-    API_LIBRARY_FILE_STATUS,
-    API_LIBRARY_FILE_UNHOLD,
-    API_LIBRARY_FILE_UPCOMING,
-    API_LIBRARY_RESCAN,
-    API_LIBRARY_RESCAN_ENABLED,
-    API_LIBRARY_STATE,
-    API_LOG,
-    API_NODE_BY_UID,
-    API_NODE_STATE,
-    API_NODES,
-    API_NVIDIA_SMI,
-    API_PLUGINS,
-    API_SCRIPTS,
-    API_SETTINGS,
-    API_SETTINGS_FILEFLOWS_STATUS,
-    API_STATUS,
-    API_STATUS_UPDATE_AVAILABLE,
-    API_SYSTEM_HISTORY_CPU,
-    API_SYSTEM_HISTORY_MEMORY,
-    API_SYSTEM_INFO,
-    API_SYSTEM_PAUSE,
-    API_SYSTEM_RESTART,
-    API_SYSTEM_VERSION,
-    API_TASKS,
-    API_TASK_RUN,
-    API_VARIABLES,
-    API_WEBHOOKS,
-    API_WORKER_ABORT,
-    API_WORKER_ABORT_BY_FILE,
-    API_WORKERS,
-    AUTH_HEADER,
-)
+from .const import AUTH_HEADER
 
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = ClientTimeout(total=30)
+
+# =============================================================================
+# Public Endpoints (no auth required) - used by Fenrus
+# =============================================================================
+REMOTE_STATUS = "/remote/info/status"
+REMOTE_SHRINKAGE = "/remote/info/shrinkage-groups"
+REMOTE_UPDATE_AVAILABLE = "/remote/info/update-available"
+REMOTE_VERSION = "/remote/info/version"
+
+# =============================================================================
+# Authenticated API Endpoints
+# =============================================================================
+API_STATUS = "/api/status"
+API_SYSTEM_VERSION = "/api/system/version"
+API_SYSTEM_INFO = "/api/system/info"
+API_SYSTEM_PAUSE = "/api/system/pause"
+API_SYSTEM_RESTART = "/api/system/restart"
+API_SETTINGS_FILEFLOWS_STATUS = "/api/settings/fileflows-status"
+API_NODES = "/api/node"
+API_LIBRARIES = "/api/library"
+API_LIBRARY_STATE = "/api/library/state"
+API_LIBRARY_RESCAN = "/api/library/rescan"
+API_LIBRARY_RESCAN_ENABLED = "/api/library/rescan-enabled"
+API_LIBRARY_FILE_STATUS = "/api/library-file/status"
+API_LIBRARY_FILE_UPCOMING = "/api/library-file/upcoming"
+API_LIBRARY_FILE_RECENTLY_FINISHED = "/api/library-file/recently-finished"
+API_LIBRARY_FILE_REPROCESS = "/api/library-file/reprocess"
+API_LIBRARY_FILE_UNHOLD = "/api/library-file/unhold"
+API_FLOWS = "/api/flow"
+API_WORKERS = "/api/worker"
+API_TASKS = "/api/task"
+API_PLUGINS = "/api/plugin"
+API_NVIDIA_SMI = "/api/nvidia/smi"
 
 
 class FileFlowsApiError(Exception):
@@ -107,13 +98,14 @@ class FileFlowsApi:
             await self._session.close()
             self._session = None
 
-    def _get_headers(self) -> dict[str, str]:
+    def _get_headers(self, use_auth: bool = True) -> dict[str, str]:
         """Get request headers."""
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        if self._access_token:
+        # Only add auth header if token is provided AND use_auth is True
+        if use_auth and self._access_token:
             headers[AUTH_HEADER] = self._access_token
         return headers
 
@@ -123,11 +115,14 @@ class FileFlowsApi:
         endpoint: str,
         data: dict[str, Any] | list | None = None,
         params: dict[str, Any] | None = None,
+        use_auth: bool = True,
     ) -> Any:
         """Make a request to the API."""
         session = await self._get_session()
         url = f"{self._base_url}{endpoint}"
-        headers = self._get_headers()
+        headers = self._get_headers(use_auth)
+
+        _LOGGER.debug("Requesting %s %s", method, url)
 
         try:
             async with session.request(
@@ -138,8 +133,10 @@ class FileFlowsApi:
                 headers=headers,
                 timeout=DEFAULT_TIMEOUT,
             ) as response:
+                _LOGGER.debug("Response status: %s", response.status)
+                
                 if response.status == 401:
-                    raise FileFlowsAuthError("Authentication failed")
+                    raise FileFlowsAuthError("Authentication failed - check access token")
                 if response.status == 403:
                     raise FileFlowsAuthError("Access forbidden")
 
@@ -150,154 +147,194 @@ class FileFlowsApi:
                     return None
 
                 content_type = response.headers.get("Content-Type", "")
+                text = await response.text()
+                
+                if not text:
+                    return None
+                    
                 if "application/json" in content_type:
                     return await response.json()
                 
                 # Try to parse as JSON anyway
-                text = await response.text()
-                if text:
-                    try:
-                        import json
-                        return json.loads(text)
-                    except:
-                        return text
-                return None
+                try:
+                    import json
+                    return json.loads(text)
+                except:
+                    return text
 
         except ClientResponseError as err:
-            _LOGGER.error("API response error: %s", err)
+            _LOGGER.error("API response error for %s: %s", endpoint, err)
             raise FileFlowsApiError(f"API error: {err.status}") from err
         except ClientError as err:
-            _LOGGER.error("Connection error: %s", err)
+            _LOGGER.error("Connection error for %s: %s", endpoint, err)
             raise FileFlowsConnectionError(f"Connection failed: {err}") from err
         except asyncio.TimeoutError as err:
-            _LOGGER.error("Request timeout")
+            _LOGGER.error("Request timeout for %s", endpoint)
             raise FileFlowsConnectionError("Request timeout") from err
 
-    async def _get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
+    async def _get(
+        self, endpoint: str, params: dict[str, Any] | None = None, use_auth: bool = True
+    ) -> Any:
         """Make a GET request."""
-        return await self._request("GET", endpoint, params=params)
+        return await self._request("GET", endpoint, params=params, use_auth=use_auth)
 
     async def _post(
-        self, endpoint: str, data: dict[str, Any] | list | None = None
+        self, endpoint: str, data: dict[str, Any] | list | None = None, use_auth: bool = True
     ) -> Any:
         """Make a POST request."""
-        return await self._request("POST", endpoint, data=data)
+        return await self._request("POST", endpoint, data=data, use_auth=use_auth)
 
     async def _put(
-        self, endpoint: str, data: dict[str, Any] | list | None = None
+        self, endpoint: str, data: dict[str, Any] | list | None = None, use_auth: bool = True
     ) -> Any:
         """Make a PUT request."""
-        return await self._request("PUT", endpoint, data=data)
+        return await self._request("PUT", endpoint, data=data, use_auth=use_auth)
 
-    async def _delete(self, endpoint: str, data: dict[str, Any] | list | None = None) -> Any:
+    async def _delete(
+        self, endpoint: str, data: dict[str, Any] | list | None = None, use_auth: bool = True
+    ) -> Any:
         """Make a DELETE request."""
-        return await self._request("DELETE", endpoint, data=data)
+        return await self._request("DELETE", endpoint, data=data, use_auth=use_auth)
 
     # =========================================================================
-    # Connection Test
+    # Connection Test - Uses PUBLIC endpoint (no auth)
     # =========================================================================
     async def test_connection(self) -> bool:
-        """Test connection to FileFlows."""
+        """Test connection to FileFlows using public endpoint."""
         try:
-            result = await self.get_status()
+            # Use the public remote/info/status endpoint - no auth needed
+            result = await self.get_remote_status()
+            # Check if we got valid data (queue should be a number)
+            if result and not isinstance(result.get("queue"), type(None)):
+                return True
             return result is not None
-        except FileFlowsApiError:
+        except FileFlowsApiError as err:
+            _LOGGER.error("Connection test failed: %s", err)
             return False
 
     # =========================================================================
-    # Status Endpoints
+    # Public/Remote Endpoints (NO AUTH REQUIRED)
+    # These are the same endpoints Fenrus uses
     # =========================================================================
-    async def get_status(self) -> dict[str, Any]:
-        """Get the current status."""
-        return await self._get(API_STATUS)
+    async def get_remote_status(self) -> dict[str, Any]:
+        """Get status from public endpoint (no auth).
+        
+        Returns: {queue, processing, processed, time, processingFiles[]}
+        """
+        result = await self._get(REMOTE_STATUS, use_auth=False)
+        return result if isinstance(result, dict) else {}
 
-    async def get_update_available(self) -> dict[str, Any]:
-        """Gets if an update is available."""
+    async def get_remote_shrinkage(self) -> list[dict[str, Any]]:
+        """Get shrinkage groups from public endpoint (no auth).
+        
+        Returns: [{Library, OriginalSize, FinalSize}, ...]
+        """
+        result = await self._get(REMOTE_SHRINKAGE, use_auth=False)
+        return result if isinstance(result, list) else []
+
+    async def get_remote_update_available(self) -> bool:
+        """Check if update is available from public endpoint (no auth)."""
         try:
-            return await self._get(API_STATUS_UPDATE_AVAILABLE)
+            result = await self._get(REMOTE_UPDATE_AVAILABLE, use_auth=False)
+            if isinstance(result, dict):
+                return result.get("UpdateAvailable", False)
+            return False
         except FileFlowsApiError:
-            return {"UpdateAvailable": False}
+            return False
+
+    async def get_remote_version(self) -> str:
+        """Get version from public endpoint (no auth)."""
+        try:
+            result = await self._get(REMOTE_VERSION, use_auth=False)
+            if isinstance(result, str):
+                return result
+            if isinstance(result, dict):
+                return result.get("Version", "Unknown")
+            return "Unknown"
+        except FileFlowsApiError:
+            return "Unknown"
 
     # =========================================================================
-    # System Endpoints
+    # Authenticated Endpoints - Require x-token header
     # =========================================================================
+    
+    # System Endpoints
     async def get_version(self) -> str:
         """Gets the version of FileFlows."""
-        result = await self._get(API_SYSTEM_VERSION)
-        if isinstance(result, str):
-            return result
-        return result.get("Version", "Unknown") if result else "Unknown"
+        # Try public endpoint first
+        version = await self.get_remote_version()
+        if version != "Unknown":
+            return version
+        # Fall back to authenticated endpoint
+        try:
+            result = await self._get(API_SYSTEM_VERSION)
+            if isinstance(result, str):
+                return result
+            return result.get("Version", "Unknown") if result else "Unknown"
+        except FileFlowsApiError:
+            return "Unknown"
 
     async def get_system_info(self) -> dict[str, Any]:
         """Gets system information (memory, CPU)."""
-        return await self._get(API_SYSTEM_INFO)
+        try:
+            return await self._get(API_SYSTEM_INFO)
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get system info: %s", err)
+            return {}
 
     async def pause_system(self, minutes: int = 0) -> bool:
         """Pause the system. minutes=0 means indefinitely."""
-        await self._post(API_SYSTEM_PAUSE, {"Minutes": minutes} if minutes > 0 else None)
-        return True
+        try:
+            await self._post(API_SYSTEM_PAUSE, {"Minutes": minutes} if minutes > 0 else None)
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to pause system: %s", err)
+            return False
 
     async def resume_system(self) -> bool:
         """Resume the system (unpause)."""
-        # Pause with -1 or specific endpoint - FileFlows uses pause toggle
-        await self._post(API_SYSTEM_PAUSE, {"Minutes": -1})
-        return True
+        try:
+            await self._post(API_SYSTEM_PAUSE, {"Minutes": -1})
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to resume system: %s", err)
+            return False
 
     async def restart_system(self) -> bool:
         """Restart FileFlows server."""
-        await self._post(API_SYSTEM_RESTART)
-        return True
-
-    async def get_cpu_history(self) -> list[dict[str, Any]]:
-        """Gets history CPU data."""
-        result = await self._get(API_SYSTEM_HISTORY_CPU)
-        return result if isinstance(result, list) else []
-
-    async def get_memory_history(self) -> list[dict[str, Any]]:
-        """Gets history memory data."""
-        result = await self._get(API_SYSTEM_HISTORY_MEMORY)
-        return result if isinstance(result, list) else []
-
-    # =========================================================================
-    # Settings Endpoints
-    # =========================================================================
-    async def get_settings(self) -> dict[str, Any]:
-        """Get the system settings."""
-        return await self._get(API_SETTINGS)
+        try:
+            await self._post(API_SYSTEM_RESTART)
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to restart system: %s", err)
+            return False
 
     async def get_fileflows_status(self) -> dict[str, Any]:
         """Gets the system status of FileFlows."""
-        return await self._get(API_SETTINGS_FILEFLOWS_STATUS)
+        try:
+            return await self._get(API_SETTINGS_FILEFLOWS_STATUS)
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get fileflows status: %s", err)
+            return {}
 
-    # =========================================================================
-    # Dashboard Endpoints
-    # =========================================================================
-    async def get_dashboards(self) -> list[dict[str, Any]]:
-        """Get all dashboards in the system."""
-        result = await self._get(API_DASHBOARD)
-        return result if isinstance(result, list) else []
-
-    async def get_dashboard_list(self) -> list[dict[str, Any]]:
-        """Get a list of all dashboards."""
-        result = await self._get(API_DASHBOARD_LIST)
-        return result if isinstance(result, list) else []
-
-    # =========================================================================
     # Node Endpoints
-    # =========================================================================
     async def get_nodes(self) -> list[dict[str, Any]]:
         """Gets all processing nodes."""
-        result = await self._get(API_NODES)
-        return result if isinstance(result, list) else []
-
-    async def get_node(self, uid: str) -> dict[str, Any]:
-        """Get a specific processing node."""
-        return await self._get(API_NODE_BY_UID.format(uid=uid))
+        try:
+            result = await self._get(API_NODES)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get nodes: %s", err)
+            return []
 
     async def set_node_state(self, uid: str, enabled: bool) -> bool:
         """Set state of a processing node."""
-        await self._put(f"{API_NODE_STATE.format(uid=uid)}?enable={str(enabled).lower()}")
-        return True
+        try:
+            await self._put(f"{API_NODES}/state/{uid}?enable={str(enabled).lower()}")
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to set node state: %s", err)
+            return False
 
     async def enable_node(self, uid: str) -> bool:
         """Enable a processing node."""
@@ -307,22 +344,24 @@ class FileFlowsApi:
         """Disable a processing node."""
         return await self.set_node_state(uid, False)
 
-    # =========================================================================
     # Library Endpoints
-    # =========================================================================
     async def get_libraries(self) -> list[dict[str, Any]]:
         """Gets all libraries."""
-        result = await self._get(API_LIBRARIES)
-        return result if isinstance(result, list) else []
-
-    async def get_library(self, uid: str) -> dict[str, Any]:
-        """Get a specific library."""
-        return await self._get(API_LIBRARY_BY_UID.format(uid=uid))
+        try:
+            result = await self._get(API_LIBRARIES)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get libraries: %s", err)
+            return []
 
     async def set_library_state(self, uid: str, enabled: bool) -> bool:
         """Set the enable state for a library."""
-        await self._put(f"{API_LIBRARY_STATE.format(uid=uid)}?enable={str(enabled).lower()}")
-        return True
+        try:
+            await self._put(f"{API_LIBRARY_STATE}/{uid}?enable={str(enabled).lower()}")
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to set library state: %s", err)
+            return False
 
     async def enable_library(self, uid: str) -> bool:
         """Enable a library."""
@@ -334,43 +373,55 @@ class FileFlowsApi:
 
     async def rescan_libraries(self, uids: list[str] | None = None) -> bool:
         """Rescan libraries."""
-        if uids:
-            await self._put(API_LIBRARY_RESCAN, uids)
-        else:
-            await self._post(API_LIBRARY_RESCAN_ENABLED)
-        return True
+        try:
+            if uids:
+                await self._put(API_LIBRARY_RESCAN, uids)
+            else:
+                await self._post(API_LIBRARY_RESCAN_ENABLED)
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to rescan libraries: %s", err)
+            return False
 
     async def rescan_all_libraries(self) -> bool:
         """Rescan all enabled libraries."""
-        await self._post(API_LIBRARY_RESCAN_ENABLED)
-        return True
+        return await self.rescan_libraries()
 
-    # =========================================================================
     # Library File Endpoints
-    # =========================================================================
     async def get_library_file_status(self) -> dict[str, Any]:
         """Gets the library status overview."""
-        return await self._get(API_LIBRARY_FILE_STATUS)
+        try:
+            return await self._get(API_LIBRARY_FILE_STATUS)
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get library file status: %s", err)
+            return {}
 
     async def get_upcoming_files(self) -> list[dict[str, Any]]:
         """Get next 10 upcoming files to process."""
-        result = await self._get(API_LIBRARY_FILE_UPCOMING)
-        return result if isinstance(result, list) else []
+        try:
+            result = await self._get(API_LIBRARY_FILE_UPCOMING)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get upcoming files: %s", err)
+            return []
 
     async def get_recently_finished(self) -> list[dict[str, Any]]:
         """Gets the last 10 successfully processed files."""
-        result = await self._get(API_LIBRARY_FILE_RECENTLY_FINISHED)
-        return result if isinstance(result, list) else []
-
-    async def get_shrinkage_groups(self) -> list[dict[str, Any]]:
-        """Get library file shrinkage grouped by library."""
-        result = await self._get(API_LIBRARY_FILE_SHRINKAGE_GROUPS)
-        return result if isinstance(result, list) else []
+        try:
+            result = await self._get(API_LIBRARY_FILE_RECENTLY_FINISHED)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get recently finished: %s", err)
+            return []
 
     async def reprocess_files(self, uids: list[str]) -> bool:
         """Reprocess library files."""
-        await self._post(API_LIBRARY_FILE_REPROCESS, uids)
-        return True
+        try:
+            await self._post(API_LIBRARY_FILE_REPROCESS, uids)
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to reprocess files: %s", err)
+            return False
 
     async def reprocess_file(self, uid: str) -> bool:
         """Reprocess a single library file."""
@@ -378,25 +429,31 @@ class FileFlowsApi:
 
     async def unhold_files(self, uids: list[str]) -> bool:
         """Unhold library files."""
-        await self._post(API_LIBRARY_FILE_UNHOLD, uids)
-        return True
+        try:
+            await self._post(API_LIBRARY_FILE_UNHOLD, uids)
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to unhold files: %s", err)
+            return False
 
-    # =========================================================================
     # Flow Endpoints
-    # =========================================================================
     async def get_flows(self) -> list[dict[str, Any]]:
         """Get all flows."""
-        result = await self._get(API_FLOWS)
-        return result if isinstance(result, list) else []
-
-    async def get_flow(self, uid: str) -> dict[str, Any]:
-        """Get a specific flow."""
-        return await self._get(API_FLOW_BY_UID.format(uid=uid))
+        try:
+            result = await self._get(API_FLOWS)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get flows: %s", err)
+            return []
 
     async def set_flow_state(self, uid: str, enabled: bool) -> bool:
         """Sets the enabled state of a flow."""
-        await self._put(f"{API_FLOW_STATE.format(uid=uid)}?enable={str(enabled).lower()}")
-        return True
+        try:
+            await self._put(f"{API_FLOWS}/state/{uid}?enable={str(enabled).lower()}")
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to set flow state: %s", err)
+            return False
 
     async def enable_flow(self, uid: str) -> bool:
         """Enable a flow."""
@@ -406,98 +463,90 @@ class FileFlowsApi:
         """Disable a flow."""
         return await self.set_flow_state(uid, False)
 
-    # =========================================================================
     # Worker Endpoints
-    # =========================================================================
     async def get_workers(self) -> list[dict[str, Any]]:
         """Get all running flow executors."""
-        result = await self._get(API_WORKERS)
-        return result if isinstance(result, list) else []
+        try:
+            result = await self._get(API_WORKERS)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get workers: %s", err)
+            return []
 
     async def abort_worker(self, uid: str) -> bool:
         """Abort work."""
-        await self._delete(API_WORKER_ABORT.format(uid=uid))
-        return True
+        try:
+            await self._delete(f"{API_WORKERS}/{uid}")
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to abort worker: %s", err)
+            return False
 
     async def abort_worker_by_file(self, file_uid: str) -> bool:
         """Abort work by library file."""
-        await self._delete(API_WORKER_ABORT_BY_FILE.format(uid=file_uid))
-        return True
+        try:
+            await self._delete(f"{API_WORKERS}/by-file/{file_uid}")
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to abort worker by file: %s", err)
+            return False
 
-    # =========================================================================
     # Task Endpoints
-    # =========================================================================
     async def get_tasks(self) -> list[dict[str, Any]]:
         """Get all scheduled tasks."""
-        result = await self._get(API_TASKS)
-        return result if isinstance(result, list) else []
+        try:
+            result = await self._get(API_TASKS)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get tasks: %s", err)
+            return []
 
     async def run_task(self, uid: str) -> bool:
         """Runs a scheduled task now."""
-        await self._post(API_TASK_RUN.format(uid=uid))
-        return True
+        try:
+            await self._post(f"{API_TASKS}/run/{uid}")
+            return True
+        except FileFlowsApiError as err:
+            _LOGGER.error("Failed to run task: %s", err)
+            return False
 
-    # =========================================================================
     # Plugin Endpoints
-    # =========================================================================
     async def get_plugins(self) -> list[dict[str, Any]]:
         """Get list of all plugins."""
-        result = await self._get(API_PLUGINS)
-        return result if isinstance(result, list) else []
+        try:
+            result = await self._get(API_PLUGINS)
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get plugins: %s", err)
+            return []
 
-    # =========================================================================
-    # Variable Endpoints
-    # =========================================================================
-    async def get_variables(self) -> list[dict[str, Any]]:
-        """Get all variables."""
-        result = await self._get(API_VARIABLES)
-        return result if isinstance(result, list) else []
-
-    # =========================================================================
-    # Script Endpoints
-    # =========================================================================
-    async def get_scripts(self) -> list[dict[str, Any]]:
-        """Get all scripts."""
-        result = await self._get(API_SCRIPTS)
-        return result if isinstance(result, list) else []
-
-    # =========================================================================
-    # Webhook Endpoints
-    # =========================================================================
-    async def get_webhooks(self) -> list[dict[str, Any]]:
-        """Get all webhooks."""
-        result = await self._get(API_WEBHOOKS)
-        return result if isinstance(result, list) else []
-
-    # =========================================================================
     # NVIDIA Endpoints
-    # =========================================================================
     async def get_nvidia_smi(self) -> dict[str, Any]:
         """Gets the NVIDIA SMI data."""
         try:
-            return await self._get(API_NVIDIA_SMI)
+            result = await self._get(API_NVIDIA_SMI)
+            return result if isinstance(result, dict) else {}
         except FileFlowsApiError:
             return {}
-
-    # =========================================================================
-    # Log Endpoints
-    # =========================================================================
-    async def get_log(self) -> str:
-        """Gets the system log."""
-        result = await self._get(API_LOG)
-        return result if isinstance(result, str) else ""
 
     # =========================================================================
     # Combined Data Fetch for Coordinator
     # =========================================================================
     async def get_all_data(self) -> dict[str, Any]:
-        """Get all data needed for sensors."""
+        """Get all data needed for sensors.
+        
+        Uses PUBLIC endpoints for basic data (no auth required),
+        and AUTHENTICATED endpoints for extended data.
+        """
         data: dict[str, Any] = {
-            "status": {},
+            # From public endpoints (always available)
+            "remote_status": {},
+            "shrinkage_groups": [],
+            "update_available": False,
+            "version": "Unknown",
+            # From authenticated endpoints (may require token)
             "system_info": {},
             "fileflows_status": {},
-            "version": "Unknown",
-            "update_available": False,
             "nodes": [],
             "libraries": [],
             "flows": [],
@@ -506,28 +555,32 @@ class FileFlowsApi:
             "plugins": [],
             "upcoming_files": [],
             "recently_finished": [],
-            "shrinkage_groups": [],
             "library_file_status": {},
             "nvidia": {},
         }
 
-        # Primary status endpoint
+        # =================================================================
+        # PUBLIC ENDPOINTS (no auth required) - These always work
+        # =================================================================
+        
+        # Remote status - primary source for queue/processing info
         try:
-            data["status"] = await self.get_status()
+            data["remote_status"] = await self.get_remote_status()
+            _LOGGER.debug("Remote status: %s", data["remote_status"])
         except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get status: %s", err)
+            _LOGGER.warning("Could not get remote status: %s", err)
 
-        # System info (CPU, Memory)
+        # Shrinkage groups (storage savings)
         try:
-            data["system_info"] = await self.get_system_info()
+            data["shrinkage_groups"] = await self.get_remote_shrinkage()
         except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get system info: %s", err)
+            _LOGGER.debug("Could not get shrinkage: %s", err)
 
-        # FileFlows status
+        # Update available
         try:
-            data["fileflows_status"] = await self.get_fileflows_status()
+            data["update_available"] = await self.get_remote_update_available()
         except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get fileflows status: %s", err)
+            _LOGGER.debug("Could not get update info: %s", err)
 
         # Version
         try:
@@ -535,12 +588,21 @@ class FileFlowsApi:
         except FileFlowsApiError as err:
             _LOGGER.debug("Could not get version: %s", err)
 
-        # Update available
+        # =================================================================
+        # AUTHENTICATED ENDPOINTS (require token if auth is enabled)
+        # =================================================================
+
+        # System info (CPU, Memory)
         try:
-            update_info = await self.get_update_available()
-            data["update_available"] = update_info.get("UpdateAvailable", False) if update_info else False
+            data["system_info"] = await self.get_system_info()
         except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get update info: %s", err)
+            _LOGGER.debug("Could not get system info (auth required?): %s", err)
+
+        # FileFlows status
+        try:
+            data["fileflows_status"] = await self.get_fileflows_status()
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get fileflows status: %s", err)
 
         # Nodes
         try:
@@ -595,12 +657,6 @@ class FileFlowsApi:
             data["recently_finished"] = await self.get_recently_finished()
         except FileFlowsApiError as err:
             _LOGGER.debug("Could not get recently finished: %s", err)
-
-        # Shrinkage groups
-        try:
-            data["shrinkage_groups"] = await self.get_shrinkage_groups()
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get shrinkage groups: %s", err)
 
         # NVIDIA SMI (optional)
         try:

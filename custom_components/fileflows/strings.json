@@ -68,6 +68,9 @@
       "active_workers": {
         "name": "Active Workers"
       },
+      "processing_time": {
+        "name": "Processing Time"
+      },
       "storage_saved": {
         "name": "Storage Saved"
       },

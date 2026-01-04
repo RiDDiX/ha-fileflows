@@ -43,21 +43,53 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Error communicating with FileFlows: {err}") from err
 
     # =========================================================================
-    # Status Properties
+    # Status Properties (from PUBLIC /remote/info/status endpoint)
     # =========================================================================
     @property
-    def status(self) -> dict[str, Any]:
-        """Get status data from /api/status."""
-        return self.data.get("status", {}) if self.data else {}
+    def remote_status(self) -> dict[str, Any]:
+        """Get status data from /remote/info/status (public endpoint).
+        
+        Returns: {queue, processing, processed, time, processingFiles[]}
+        """
+        return self.data.get("remote_status", {}) if self.data else {}
 
     @property
     def is_paused(self) -> bool:
         """Check if system is paused."""
-        # Check multiple sources for pause state
+        # Check fileflows_status first (from authenticated endpoint)
         status = self.fileflows_status
         if status:
             return status.get("IsPaused", False)
+        # Fall back to system_info
         return self.system_info.get("IsPaused", False)
+
+    @property
+    def queue_from_remote(self) -> int:
+        """Get queue size from remote status."""
+        return self.remote_status.get("queue", 0)
+
+    @property
+    def processing_from_remote(self) -> int:
+        """Get processing count from remote status."""
+        return self.remote_status.get("processing", 0)
+
+    @property
+    def processed_from_remote(self) -> int:
+        """Get processed count from remote status."""
+        return self.remote_status.get("processed", 0)
+
+    @property
+    def processing_time(self) -> str:
+        """Get processing time from remote status."""
+        return self.remote_status.get("time", "")
+
+    @property
+    def processing_files(self) -> list[dict[str, Any]]:
+        """Get currently processing files from remote status.
+        
+        Returns: [{name, relativePath, library, step, stepPercent}, ...]
+        """
+        return self.remote_status.get("processingFiles", [])
 
     # =========================================================================
     # System Info Properties
@@ -174,26 +206,42 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return len([f for f in self.flows if f.get("Enabled", False)])
 
     # =========================================================================
-    # Worker Properties
+    # Worker Properties (combines remote_status + /api/worker)
     # =========================================================================
     @property
     def workers(self) -> list[dict[str, Any]]:
-        """Get all running workers/executors."""
+        """Get all running workers/executors from authenticated endpoint."""
         return self.data.get("workers", []) if self.data else []
 
     @property
     def active_workers(self) -> int:
         """Get number of active workers."""
+        # Use processing_files from public endpoint as primary source
+        pf = self.processing_files
+        if pf:
+            return len(pf)
+        # Fall back to workers from authenticated endpoint
         return len(self.workers)
 
     @property
     def is_processing(self) -> bool:
         """Check if any files are being processed."""
+        # Use remote_status first (public endpoint)
+        if self.processing_files:
+            return True
+        if self.processing_from_remote > 0:
+            return True
+        # Fall back to workers
         return len(self.workers) > 0
 
     @property
     def current_file(self) -> str | None:
         """Get current processing file name."""
+        # Use processingFiles from remote_status first
+        pf = self.processing_files
+        if pf:
+            return pf[0].get("name", pf[0].get("relativePath", "Unknown"))
+        # Fall back to workers
         if self.workers:
             worker = self.workers[0]
             return worker.get("CurrentFile", worker.get("LibraryFile", {}).get("Name", "Unknown"))
@@ -202,31 +250,65 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def current_file_progress(self) -> float:
         """Get current file progress percentage."""
+        # Use processingFiles from remote_status first
+        pf = self.processing_files
+        if pf:
+            return pf[0].get("stepPercent", 0.0)
+        # Fall back to workers
         if self.workers:
-            return self.workers[0].get("TotalParts", 0)
+            return self.workers[0].get("CurrentPartPercent", 0.0)
         return 0.0
 
+    @property
+    def current_step(self) -> str | None:
+        """Get current processing step name."""
+        pf = self.processing_files
+        if pf:
+            return pf[0].get("step", None)
+        if self.workers:
+            return self.workers[0].get("CurrentPartName", None)
+        return None
+
     # =========================================================================
-    # Library File Status Properties
+    # Library File Status Properties (combines remote + authenticated data)
     # =========================================================================
     @property
     def library_file_status(self) -> dict[str, Any]:
-        """Get library file status overview."""
+        """Get library file status overview from authenticated endpoint."""
         return self.data.get("library_file_status", {}) if self.data else {}
 
     @property
     def files_unprocessed(self) -> int:
         """Get unprocessed files count."""
+        # Use queue from remote_status as primary (public endpoint)
+        queue = self.queue_from_remote
+        if queue > 0:
+            return queue
+        # Fall back to library_file_status (authenticated)
         return self.library_file_status.get("Unprocessed", 0)
 
     @property
     def files_processed(self) -> int:
         """Get processed files count."""
+        # Use processed from remote_status as primary
+        processed = self.processed_from_remote
+        if processed > 0:
+            return processed
+        # Fall back to library_file_status
         return self.library_file_status.get("Processed", 0)
 
     @property
     def files_processing(self) -> int:
         """Get processing files count."""
+        # Use processing from remote_status as primary
+        processing = self.processing_from_remote
+        if processing > 0:
+            return processing
+        # Or count processingFiles
+        pf = self.processing_files
+        if pf:
+            return len(pf)
+        # Fall back to library_file_status
         return self.library_file_status.get("Processing", 0)
 
     @property
@@ -251,7 +333,15 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def queue_size(self) -> int:
-        """Get total queue size (unprocessed + processing)."""
+        """Get total queue size.
+        
+        Uses queue from public remote_status endpoint as primary source.
+        """
+        # Remote status queue is the authoritative source
+        queue = self.queue_from_remote
+        if queue > 0:
+            return queue
+        # Fall back to unprocessed + processing from library_file_status
         return self.files_unprocessed + self.files_processing
 
     # =========================================================================

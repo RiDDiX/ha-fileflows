@@ -71,14 +71,16 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         native_unit_of_measurement="files",
         value_fn=lambda c: c.files_processing,
         attr_fn=lambda c: {
-            "workers": [
+            "processing_time": c.processing_time,
+            "files": [
                 {
-                    "file": w.get("LibraryFile", {}).get("Name", w.get("CurrentFile", "Unknown")),
-                    "node": w.get("NodeName", "Unknown"),
-                    "flow": w.get("FlowName", "Unknown"),
+                    "file": pf.get("name", pf.get("relativePath", "Unknown")),
+                    "library": pf.get("library", "Unknown"),
+                    "step": pf.get("step", "Unknown"),
+                    "progress": pf.get("stepPercent", 0),
                 }
-                for w in c.workers
-            ],
+                for pf in c.processing_files
+            ] if c.processing_files else [],
         },
     ),
     FileFlowsSensorEntityDescription(
@@ -128,16 +130,18 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         value_fn=lambda c: c.current_file or "Idle",
         attr_fn=lambda c: {
             "workers_count": c.active_workers,
+            "progress": c.current_file_progress,
+            "step": c.current_step,
+            "processing_time": c.processing_time,
             "details": [
                 {
-                    "file": w.get("LibraryFile", {}).get("Name", w.get("CurrentFile", "Unknown")),
-                    "node": w.get("NodeName", "Unknown"),
-                    "flow": w.get("FlowName", "Unknown"),
-                    "step": w.get("CurrentPartName", "Unknown"),
-                    "progress": w.get("CurrentPartPercent", 0),
+                    "file": pf.get("name", pf.get("relativePath", "Unknown")),
+                    "library": pf.get("library", "Unknown"),
+                    "step": pf.get("step", "Unknown"),
+                    "progress": pf.get("stepPercent", 0),
                 }
-                for w in c.workers
-            ] if c.workers else [],
+                for pf in c.processing_files
+            ] if c.processing_files else [],
         },
     ),
     FileFlowsSensorEntityDescription(
@@ -151,6 +155,13 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         attr_fn=lambda c: {
             "total_runners": c.total_runners,
         },
+    ),
+    FileFlowsSensorEntityDescription(
+        key="processing_time",
+        translation_key="processing_time",
+        name="Processing Time",
+        icon="mdi:timer-outline",
+        value_fn=lambda c: c.processing_time or "00:00:00",
     ),
     # -------------------------------------------------------------------------
     # Storage Savings

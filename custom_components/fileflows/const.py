@@ -23,7 +23,15 @@ DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 AUTH_HEADER: Final = "x-token"
 
 # =============================================================================
-# API Endpoints - Status
+# Remote/Public Endpoints (no auth required)
+# =============================================================================
+API_REMOTE_STATUS: Final = "/remote/info/status"
+API_REMOTE_SHRINKAGE: Final = "/remote/info/shrinkage-groups"
+API_REMOTE_UPDATE_AVAILABLE: Final = "/remote/info/update-available"
+API_REMOTE_VERSION: Final = "/remote/info/version"
+
+# =============================================================================
+# API Endpoints - Status (authenticated)
 # =============================================================================
 API_STATUS: Final = "/api/status"
 API_STATUS_UPDATE_AVAILABLE: Final = "/api/status/update-available"
