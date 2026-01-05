@@ -55,13 +55,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
     session = async_get_clientsession(hass, verify_ssl=data.get(CONF_VERIFY_SSL, True))
 
+    # Clean username/password - convert empty strings to None
+    username = data.get(CONF_USERNAME, "").strip() or None
+    password = data.get(CONF_PASSWORD, "").strip() or None
+
     api = FileFlowsApi(
         host=data[CONF_HOST],
         port=data.get(CONF_PORT, DEFAULT_PORT),
         ssl=data.get(CONF_SSL, DEFAULT_SSL),
         verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        username=data.get(CONF_USERNAME),
-        password=data.get(CONF_PASSWORD),
+        username=username,
+        password=password,
         session=session,
     )
 
@@ -89,9 +93,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         version = "Unknown"
 
     # If username/password provided, test Bearer token authentication
-    if data.get(CONF_USERNAME) and data.get(CONF_PASSWORD):
+    if username and password:
         _LOGGER.info("Credentials provided, testing Bearer token authentication...")
-        _LOGGER.debug("Username: %s", data.get(CONF_USERNAME))
+        _LOGGER.debug("Username: %s", username)
 
         try:
             # Try to get Bearer token to verify credentials work
@@ -101,7 +105,19 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                 _LOGGER.error("Failed to obtain Bearer token - no token returned")
                 raise InvalidAuth("Failed to obtain Bearer token")
 
-            _LOGGER.info("Bearer token authentication successful (token length: %d)", len(token))
+            _LOGGER.info("Bearer token acquired successfully (token length: %d)", len(token))
+
+            # Test the token by calling an authenticated endpoint
+            _LOGGER.debug("Testing Bearer token with /api/system/info...")
+            try:
+                system_info = await api.get_system_info()
+                if system_info:
+                    _LOGGER.info("Bearer token authentication verified - authenticated API access successful")
+                else:
+                    _LOGGER.warning("Bearer token accepted but /api/system/info returned empty data")
+            except Exception as status_err:
+                _LOGGER.error("Bearer token test failed on authenticated endpoint: %s", status_err)
+                raise InvalidAuth(f"Bearer token obtained but API access failed: {status_err}")
 
         except FileFlowsAuthError as err:
             _LOGGER.error("Bearer authentication failed: %s", err)

@@ -60,13 +60,17 @@ PLATFORMS: list[Platform] = [
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FileFlows from a config entry."""
+    # Clean username/password - convert empty strings to None
+    username = entry.data.get(CONF_USERNAME, "").strip() if entry.data.get(CONF_USERNAME) else None
+    password = entry.data.get(CONF_PASSWORD, "").strip() if entry.data.get(CONF_PASSWORD) else None
+
     api = FileFlowsApi(
         host=entry.data[CONF_HOST],
         port=entry.data.get(CONF_PORT, DEFAULT_PORT),
         ssl=entry.data.get(CONF_SSL, DEFAULT_SSL),
         verify_ssl=entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        username=entry.data.get(CONF_USERNAME),
-        password=entry.data.get(CONF_PASSWORD),
+        username=username,
+        password=password,
     )
 
     try:
