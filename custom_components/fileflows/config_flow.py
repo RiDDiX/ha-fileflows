@@ -15,8 +15,9 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import FileFlowsApi, FileFlowsApiError, FileFlowsAuthError, FileFlowsConnectionError
 from .const import (
-    CONF_ACCESS_TOKEN,
+    CONF_PASSWORD,
     CONF_SSL,
+    CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_PORT,
     DEFAULT_SSL,
@@ -32,7 +33,8 @@ def get_schema(
     port: int = DEFAULT_PORT,
     ssl: bool = DEFAULT_SSL,
     verify_ssl: bool = DEFAULT_VERIFY_SSL,
-    access_token: str = "",
+    username: str = "",
+    password: str = "",
 ) -> vol.Schema:
     """Get the config schema."""
     return vol.Schema(
@@ -41,7 +43,8 @@ def get_schema(
             vol.Required(CONF_PORT, default=port): int,
             vol.Required(CONF_SSL, default=ssl): bool,
             vol.Required(CONF_VERIFY_SSL, default=verify_ssl): bool,
-            vol.Optional(CONF_ACCESS_TOKEN, default=access_token): str,
+            vol.Optional(CONF_USERNAME, default=username): str,
+            vol.Optional(CONF_PASSWORD, default=password): str,
         }
     )
 
@@ -49,13 +52,14 @@ def get_schema(
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     session = async_get_clientsession(hass, verify_ssl=data.get(CONF_VERIFY_SSL, True))
-    
+
     api = FileFlowsApi(
         host=data[CONF_HOST],
         port=data.get(CONF_PORT, DEFAULT_PORT),
         ssl=data.get(CONF_SSL, DEFAULT_SSL),
         verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        access_token=data.get(CONF_ACCESS_TOKEN),
+        username=data.get(CONF_USERNAME),
+        password=data.get(CONF_PASSWORD),
         session=session,
     )
 
@@ -63,8 +67,25 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # Test connection with public remote/info/status endpoint (no auth required)
         if not await api.test_connection():
             raise CannotConnect("Connection test failed")
+
         # Get version info
         version = await api.get_version()
+
+        # If username/password provided, test Bearer token authentication
+        if data.get(CONF_USERNAME) and data.get(CONF_PASSWORD):
+            _LOGGER.info("Testing Bearer token authentication...")
+            try:
+                # Try to get authenticated data to verify credentials work
+                token = await api._get_bearer_token()
+                if not token:
+                    raise FileFlowsAuthError("Failed to obtain Bearer token")
+                _LOGGER.info("Bearer token authentication successful")
+            except FileFlowsAuthError as err:
+                _LOGGER.error("Bearer authentication failed: %s", err)
+                raise InvalidAuth from err
+        else:
+            _LOGGER.info("No credentials provided - will use public endpoints only")
+
     except FileFlowsAuthError as err:
         raise InvalidAuth from err
     except FileFlowsConnectionError as err:

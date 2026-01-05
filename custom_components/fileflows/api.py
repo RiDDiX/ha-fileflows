@@ -1,18 +1,18 @@
-"""FileFlows API Client."""
+"""FileFlows API Client with Bearer Token Authentication."""
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 import aiohttp
 from aiohttp import ClientError, ClientResponseError, ClientTimeout
 
-from .const import AUTH_HEADER
-
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = ClientTimeout(total=30)
+TOKEN_CACHE_DURATION = timedelta(hours=23)  # Token typically valid for 24h, refresh before expiry
 
 # =============================================================================
 # Public Endpoints (no auth required) - used by Fenrus
@@ -61,7 +61,7 @@ class FileFlowsAuthError(FileFlowsApiError):
 
 
 class FileFlowsApi:
-    """FileFlows API Client."""
+    """FileFlows API Client with Bearer Token Authentication."""
 
     def __init__(
         self,
@@ -69,17 +69,33 @@ class FileFlowsApi:
         port: int = 19200,
         ssl: bool = False,
         verify_ssl: bool = True,
-        access_token: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         session: aiohttp.ClientSession | None = None,
     ) -> None:
-        """Initialize the API client."""
+        """Initialize the API client.
+
+        Args:
+            host: FileFlows server hostname/IP
+            port: FileFlows server port (default 19200)
+            ssl: Use HTTPS instead of HTTP
+            verify_ssl: Verify SSL certificates
+            username: Username for Bearer token authentication (optional)
+            password: Password for Bearer token authentication (optional)
+            session: Existing aiohttp session (optional)
+        """
         self._host = host
         self._port = port
         self._ssl = ssl
         self._verify_ssl = verify_ssl
-        self._access_token = access_token
+        self._username = username
+        self._password = password
         self._session = session
         self._close_session = False
+
+        # Bearer token management
+        self._bearer_token: str | None = None
+        self._token_expires_at: datetime | None = None
 
         protocol = "https" if ssl else "http"
         self._base_url = f"{protocol}://{host}:{port}"
@@ -98,15 +114,78 @@ class FileFlowsApi:
             await self._session.close()
             self._session = None
 
-    def _get_headers(self, use_auth: bool = True) -> dict[str, str]:
-        """Get request headers."""
+    async def _get_bearer_token(self) -> str | None:
+        """Get Bearer token, login if needed or token expired.
+
+        Returns:
+            Bearer token string or None if auth not configured
+        """
+        # No credentials configured - can't authenticate
+        if not self._username or not self._password:
+            return None
+
+        # Check if we have a valid cached token
+        if self._bearer_token and self._token_expires_at:
+            if datetime.now() < self._token_expires_at:
+                _LOGGER.debug("Using cached Bearer token")
+                return self._bearer_token
+
+        # Need to login and get new token
+        _LOGGER.debug("Acquiring new Bearer token for user: %s", self._username)
+
+        session = await self._get_session()
+        url = f"{self._base_url}/authorize"
+
+        try:
+            async with session.post(
+                url,
+                json={"username": self._username, "password": self._password},
+                headers={"Content-Type": "application/json"},
+                timeout=DEFAULT_TIMEOUT,
+            ) as response:
+                if response.status == 401:
+                    raise FileFlowsAuthError("Login failed - invalid username or password")
+
+                response.raise_for_status()
+
+                # Token is returned as plain text with quotes
+                token = await response.text()
+                token = token.strip().strip('"')  # Remove quotes and whitespace
+
+                if not token:
+                    raise FileFlowsAuthError("Login succeeded but no token received")
+
+                # Cache the token
+                self._bearer_token = token
+                self._token_expires_at = datetime.now() + TOKEN_CACHE_DURATION
+
+                _LOGGER.info("Bearer token acquired successfully")
+                return token
+
+        except ClientResponseError as err:
+            _LOGGER.error("Login failed: HTTP %s", err.status)
+            raise FileFlowsAuthError(f"Login failed: {err.status}") from err
+        except ClientError as err:
+            _LOGGER.error("Connection error during login: %s", err)
+            raise FileFlowsConnectionError(f"Login connection failed: {err}") from err
+
+    def _get_headers(self, use_auth: bool = True, bearer_token: str | None = None) -> dict[str, str]:
+        """Get request headers.
+
+        Args:
+            use_auth: Whether to include authentication
+            bearer_token: Bearer token to use (if available)
+
+        Returns:
+            Headers dictionary
+        """
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        # Only add auth header if token is provided AND use_auth is True
-        if use_auth and self._access_token:
-            headers[AUTH_HEADER] = self._access_token
+        # Add Bearer token if provided
+        if use_auth and bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
         return headers
 
     async def _request(
@@ -117,10 +196,29 @@ class FileFlowsApi:
         params: dict[str, Any] | None = None,
         use_auth: bool = True,
     ) -> Any:
-        """Make a request to the API."""
+        """Make a request to the API with automatic Bearer token handling.
+
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE)
+            endpoint: API endpoint (e.g., "/api/status")
+            data: JSON data for request body
+            params: URL query parameters
+            use_auth: Whether to use Bearer token authentication
+
+        Returns:
+            Response data (dict, list, or string)
+        """
         session = await self._get_session()
         url = f"{self._base_url}{endpoint}"
-        headers = self._get_headers(use_auth)
+
+        # Get Bearer token if needed for /api/* endpoints
+        bearer_token = None
+        if use_auth and endpoint.startswith("/api"):
+            bearer_token = await self._get_bearer_token()
+            if bearer_token:
+                _LOGGER.debug("Using Bearer auth for: %s", endpoint)
+
+        headers = self._get_headers(use_auth, bearer_token)
 
         _LOGGER.debug("Requesting %s %s", method, url)
 
@@ -134,33 +232,36 @@ class FileFlowsApi:
                 timeout=DEFAULT_TIMEOUT,
             ) as response:
                 _LOGGER.debug("Response status: %s", response.status)
-                
+
                 if response.status == 401:
-                    raise FileFlowsAuthError("Authentication failed - check access token")
+                    # Token might be expired, try to refresh once
+                    if bearer_token and endpoint.startswith("/api"):
+                        _LOGGER.warning("401 error, token might be expired. Clearing cache and retrying once...")
+                        self._bearer_token = None
+                        self._token_expires_at = None
+
+                        # Retry once with fresh token
+                        bearer_token = await self._get_bearer_token()
+                        if bearer_token:
+                            headers = self._get_headers(use_auth, bearer_token)
+                            async with session.request(
+                                method, url, json=data, params=params, headers=headers, timeout=DEFAULT_TIMEOUT
+                            ) as retry_response:
+                                if retry_response.status == 401:
+                                    raise FileFlowsAuthError("Authentication failed - check credentials")
+                                retry_response.raise_for_status()
+                                return await self._parse_response(retry_response)
+                        else:
+                            raise FileFlowsAuthError("Authentication required but no credentials configured")
+                    else:
+                        raise FileFlowsAuthError("Authentication failed")
+
                 if response.status == 403:
                     raise FileFlowsAuthError("Access forbidden")
 
                 response.raise_for_status()
 
-                # Handle empty responses
-                if response.status == 204:
-                    return None
-
-                content_type = response.headers.get("Content-Type", "")
-                text = await response.text()
-                
-                if not text:
-                    return None
-                    
-                if "application/json" in content_type:
-                    return await response.json()
-                
-                # Try to parse as JSON anyway
-                try:
-                    import json
-                    return json.loads(text)
-                except:
-                    return text
+                return await self._parse_response(response)
 
         except ClientResponseError as err:
             _LOGGER.error("API response error for %s: %s", endpoint, err)
@@ -171,6 +272,35 @@ class FileFlowsApi:
         except asyncio.TimeoutError as err:
             _LOGGER.error("Request timeout for %s", endpoint)
             raise FileFlowsConnectionError("Request timeout") from err
+
+    async def _parse_response(self, response: aiohttp.ClientResponse) -> Any:
+        """Parse API response.
+
+        Args:
+            response: aiohttp response object
+
+        Returns:
+            Parsed response data
+        """
+        # Handle empty responses
+        if response.status == 204:
+            return None
+
+        content_type = response.headers.get("Content-Type", "")
+        text = await response.text()
+
+        if not text:
+            return None
+
+        if "application/json" in content_type:
+            return await response.json()
+
+        # Try to parse as JSON anyway
+        try:
+            import json
+            return json.loads(text)
+        except:
+            return text
 
     async def _get(
         self, endpoint: str, params: dict[str, Any] | None = None, use_auth: bool = True

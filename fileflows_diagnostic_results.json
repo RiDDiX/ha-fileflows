@@ -1,0 +1,91 @@
+{
+  "public_endpoints": [
+    {
+      "endpoint": "/remote/info/status",
+      "status": 401,
+      "success": false,
+      "data": "Unauthorized: Invalid API token",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/remote/info/shrinkage-groups",
+      "status": 401,
+      "success": false,
+      "data": "Unauthorized: Invalid API token",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/remote/info/update-available",
+      "status": 401,
+      "success": false,
+      "data": "Unauthorized: Invalid API token",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/remote/info/version",
+      "status": 200,
+      "success": true,
+      "data": "<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"minimal-ui, width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no\" />\n    <meta name=\"color-scheme\" content=\"dark\">\n    <title>FileFlows</title>\n    <base href=\"/\" />\n    <link href=\"css/bootstrap/bootstrap.min.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"css/uplot.min.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"css/theme.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"css/app.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"Client.styles.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"css/fontawesome/fontawesome.min.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"css/fontawesome/all.min.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link href=\"_content/BlazorMonaco/lib/monaco-editor/min/vs/editor/editor.main.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n    <link rel=\"icon\" href=\"favicon.svg?v=25.12.9.6135\">\n    <link rel=\"manifest\" href=\"/manifest.json?v=25.12.9.6135\">\n    <link rel=\"stylesheet\" href=\"_content/BlazorDateRangePicker/daterangepicker.min.css?v=25.12.9.6135\" />\n    <link href=\"_content/Blazor.ContextMenu/blazorContextMenu.min.css?v=25.12.9.6135\" rel=\"stylesheet\" />\n\n\n    <script type=\"text/javascript\">\n        window.onerror = function(message, source, lineno, colno, error) {\n            // Handle the error here\n            console.error(\"@@@Error:\", message, \"at\", source, \"line:\", lineno, \"column:\", colno);\n        };\n        window.addEventListener('error', function(event) {\n            // Check if the sidebar element exists\n            var sidebarLoaded = !!document.querySelector('.sidebar');\n            console.log('got error, has sidebar: ' + sidebarLoaded);\n\n            // If the sidebar is not loaded, trigger a refresh\n            if (!sidebarLoaded) {\n                //   location.reload();\n            }\n        });\n        window.localStorageEnabled = function(){\n            try{\n                localStorage.getItem('');\n                return true;\n            }catch(err){\n                return false;\n            }\n        };\n    </script>\n    \n    <script defer src=\"_content/BlazorDateRangePicker/clickAndPositionHandler.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/gridstack/gridstack-h5.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/handlebars.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/swiper.js?v=25.12.9.6135\"></script>\n    <script src=\"_content/Blazor.ContextMenu/blazorContextMenu.min.js?v=25.12.9.6135\"></script>\n    <link rel=\"stylesheet\" href=\"css/gridstack/gridstack.min.css?v=25.12.9.6135\" />\n    <link rel=\"stylesheet\" href=\"css/gridstack/gridstack-extra.min.css?v=25.12.9.6135\" />\n</head>\n\n<body>\n    <div id=\"unsupported-browser\" style=\"display:none\">\n        Your browser is unsupported.&nbsp;&nbsp;We recommend Chrome, Firefox, Edge or Vivaldi.\n        <span class=\"dismiss fas fa-times\" onclick=\"document.getElementById('unsupported-browser').remove()\"></span>\n    </div>\n\n    <div id=\"app\">\n        <div class=\"blocker\">\n            <div class=\"blocker-indicator\">\n                <div class=\"blocker-spinner\">\n                </div>\n                <div class=\"blocker-message\">\n                    Loading...\n                </div>\n            </div>\n        </div>\n\n        <span class=\"loading-version\">25.12.9.6135</span>\n    </div>\n\n    <div id=\"blazor-error-ui\">\n        <div class=\"blazor-error-ui-wrapper\">\n            <span class=\"errormessage\">\n                An unhandled error has occurred.\n                <a href=\"\" class=\"reload\">Reload</a>\n            </span>\n            <span class=\"report\"><a href=\"https://fileflows.com/docs/guides/unexpected-issue\" target=\"_blank\" rel=\"noreferrer\">Report this issue</a></span>\n            <a class=\"dismiss\">x</a>\n        </div>\n    </div>\n    <script src=\"_framework/blazor.webassembly.js?culture=en-us&v=25.12.9.6135\" autostart=\"false\"></script>\n    <script type=\"module\">\n        import { BrotliDecode } from './scripts/decode.min.js?v=25.12.9.6135';\n        Blazor.start({\n            loadBootResource: function (type, name, defaultUri, integrity) {\n                switch (type) {\n                    case 'dotnetjs':\n                    case 'dotnetwasm':\n                    case 'timezonedata':\n                        return defaultUri + '?v=25.12.9.6135';\n                }\n                if (type !== 'dotnetjs' ) {\n                    return (async function () {\n                        const response = await fetch(defaultUri + '.br?v=25.12.9.6135', { cache: 'no-cache' });\n                        if (!response.ok) {\n                            throw new Error(response.statusText);\n                        }\n                        const originalResponseBuffer = await response.arrayBuffer();\n                        const originalResponseArray = new Int8Array(originalResponseBuffer);\n                        const decompressedResponseArray = BrotliDecode(originalResponseArray);\n                        const contentType = type ===\n                            'dotnetwasm' ? 'application/wasm' : 'application/octet-stream';\n                        return new Response(decompressedResponseArray,\n                            { headers: { 'content-type': contentType } });\n                    })();\n                }\n            }\n        });\n    </script>\n    <script src=\"scripts/smoothie.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/chartjs.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/chartjs-adapter-date-fns.bundle.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/chartjs-plugin-streaming.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/uplot.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/app.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/toast.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/hammer.min.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/flow/flowpart.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/flow/flowmouse.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/flow/flowlines.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/flow/flowhistory.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/flow/flow.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/code.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/apexcharts.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/ClientService.js?v=25.12.9.6135\"></script>\n    <script src=\"scripts/ffColor.js?v=25.12.9.6135\"></script>\n    <script defer src=\"scripts/inputs/time-span-input.js?v=25.12.9.6135\"></script>\n\n\n    <script src=\"vs/loader.js?v=25.12.9.6135\"></script>\n    <script>require.config({ paths: { 'vs': 'vs' } });</script>\n    <script src=\"vs/editor/editor.main.js?v=25.12.9.6135\"></script>\n    <script src=\"_content/BlazorMonaco/jsInterop.js?v=25.12.9.6135\"></script>\n\n    <script>\n        if (window.safari) {\n            document.body.classList.add('safari');\n            // document.getElementById(\"unsupported-browser\").style.display = \"unset\";\n        }\n        if(/photino/i.test(navigator.userAgent)){\n            let root = document.getElementsByTagName( 'html' )[0]; // '0' to assign the first (and only `HTML` tag)\n            root.setAttribute( 'class', 'photino' );\n            document.body.classList.add('photino');\n            window.PHOTINO = true;\n        }\n    </script>\n</body>\n\n</html>\n",
+      "auth_used": false
+    }
+  ],
+  "auth_endpoints_no_token": [
+    {
+      "endpoint": "/api/status",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/system/info",
+      "status": 404,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/node",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/library",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/flow",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/plugin",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/task",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    },
+    {
+      "endpoint": "/api/library-file/status",
+      "status": 401,
+      "success": false,
+      "data": "",
+      "auth_used": false
+    }
+  ],
+  "auth_endpoints_with_token": []
+}

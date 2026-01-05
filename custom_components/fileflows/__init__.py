@@ -20,9 +20,10 @@ from .const import (
     ATTR_NODE_UID,
     ATTR_TASK_UID,
     ATTR_WORKER_UID,
-    CONF_ACCESS_TOKEN,
+    CONF_PASSWORD,
     CONF_PORT,
     CONF_SSL,
+    CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_PORT,
     DEFAULT_SSL,
@@ -64,7 +65,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=entry.data.get(CONF_PORT, DEFAULT_PORT),
         ssl=entry.data.get(CONF_SSL, DEFAULT_SSL),
         verify_ssl=entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        access_token=entry.data.get(CONF_ACCESS_TOKEN),
+        username=entry.data.get(CONF_USERNAME),
+        password=entry.data.get(CONF_PASSWORD),
     )
 
     try:

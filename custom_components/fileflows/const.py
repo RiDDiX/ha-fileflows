@@ -11,7 +11,8 @@ CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"
 CONF_SSL: Final = "ssl"
 CONF_VERIFY_SSL: Final = "verify_ssl"
-CONF_ACCESS_TOKEN: Final = "access_token"
+CONF_USERNAME: Final = "username"
+CONF_PASSWORD: Final = "password"
 
 # Defaults
 DEFAULT_PORT: Final = 19200
@@ -19,8 +20,9 @@ DEFAULT_SSL: Final = False
 DEFAULT_VERIFY_SSL: Final = True
 DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)
 
-# Auth Header
-AUTH_HEADER: Final = "x-token"
+# Authentication
+AUTH_ENDPOINT: Final = "/authorize"
+AUTH_BEARER_PREFIX: Final = "Bearer "
 
 # =============================================================================
 # Remote/Public Endpoints (no auth required)
