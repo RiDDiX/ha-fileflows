@@ -42,7 +42,7 @@ Password: your_password  # ✅ Wird für Bearer Token verwendet
 4. Klicken Sie auf **KONFIGURIEREN** oder löschen Sie die alte Integration und fügen Sie sie neu hinzu
 5. Geben Sie ein:
    - **Host**: Ihre FileFlows IP-Adresse (z.B. 192.168.1.100)
-   - **Port**: Ihr Port (Standard: 19200 oder 8585)
+   - **Port**: Ihr Port (Standard: 8585)
    - **SSL**: false (oder true wenn Sie HTTPS verwenden)
    - **Verify SSL**: true
    - **Username**: Ihr FileFlows Benutzername

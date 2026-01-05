@@ -13,13 +13,13 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, PERCENTAGE, UnitOfInformation, UnitOfTemperature
+from homeassistant.const import CONF_HOST, CONF_PORT, PERCENTAGE, UnitOfInformation, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DEFAULT_PORT, DOMAIN
 from .coordinator import FileFlowsDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -501,7 +501,7 @@ class FileFlowsSensor(CoordinatorEntity[FileFlowsDataUpdateCoordinator], SensorE
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     @property

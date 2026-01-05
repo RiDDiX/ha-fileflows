@@ -29,8 +29,8 @@ curl http://YOUR_FILEFLOWS_IP:YOUR_PORT/remote/info/status
 #### 2. Falscher Port konfiguriert
 
 **Standard-Ports:**
-- FileFlows Standard: `19200`
-- Oft verwendet: `8585`
+- Häufigster Port: `8585`
+- Alternativer Port: `19200`
 
 **Prüfen:**
 ```bash
@@ -231,13 +231,13 @@ networks:
 **Lösung - Nginx Beispiel:**
 ```nginx
 location /api/ {
-    proxy_pass http://fileflows:19200;
+    proxy_pass http://fileflows:8585;
     proxy_set_header Authorization $http_authorization;
     proxy_pass_header Authorization;
 }
 
 location /authorize {
-    proxy_pass http://fileflows:19200;
+    proxy_pass http://fileflows:8585;
     proxy_set_header Content-Type application/json;
 }
 ```

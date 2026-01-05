@@ -66,7 +66,7 @@ class FileFlowsApi:
     def __init__(
         self,
         host: str,
-        port: int = 19200,
+        port: int = 8585,
         ssl: bool = False,
         verify_ssl: bool = True,
         username: str | None = None,
@@ -77,7 +77,7 @@ class FileFlowsApi:
 
         Args:
             host: FileFlows server hostname/IP
-            port: FileFlows server port (default 19200)
+            port: FileFlows server port (default 8585)
             ssl: Use HTTPS instead of HTTP
             verify_ssl: Verify SSL certificates
             username: Username for Bearer token authentication (optional)
@@ -385,7 +385,7 @@ class FileFlowsApi:
             return "Unknown"
 
     # =========================================================================
-    # Authenticated Endpoints - Require x-token header
+    # Authenticated Endpoints - Require Bearer token authentication
     # =========================================================================
     
     # System Endpoints

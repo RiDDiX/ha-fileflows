@@ -9,14 +9,16 @@
           "port": "Port",
           "ssl": "Use SSL",
           "verify_ssl": "Verify SSL Certificate",
-          "access_token": "Access Token (optional)"
+          "username": "Username (optional)",
+          "password": "Password (optional)"
         },
         "data_description": {
           "host": "IP address or hostname of your FileFlows server",
-          "port": "Port number (default: 19200)",
+          "port": "Port number (default: 8585)",
           "ssl": "Enable if using HTTPS",
           "verify_ssl": "Verify SSL certificate (disable for self-signed)",
-          "access_token": "API access token if authentication is enabled"
+          "username": "FileFlows username for authentication",
+          "password": "FileFlows password for authentication"
         }
       }
     },

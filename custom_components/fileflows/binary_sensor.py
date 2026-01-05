@@ -12,13 +12,13 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DEFAULT_PORT, DOMAIN
 from .coordinator import FileFlowsDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -174,7 +174,7 @@ class FileFlowsBinarySensor(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     @property
@@ -226,7 +226,7 @@ class FileFlowsNodeBinarySensor(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     @property
@@ -278,7 +278,7 @@ class FileFlowsLibraryBinarySensor(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     @property

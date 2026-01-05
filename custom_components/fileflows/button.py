@@ -6,13 +6,13 @@ from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DEFAULT_PORT, DOMAIN
 from .coordinator import FileFlowsDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class FileFlowsPauseButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:
@@ -110,7 +110,7 @@ class FileFlowsResumeButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:
@@ -142,7 +142,7 @@ class FileFlowsRestartButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:
@@ -173,7 +173,7 @@ class FileFlowsRescanAllButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:
@@ -205,7 +205,7 @@ class FileFlowsRefreshButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:
@@ -240,7 +240,7 @@ class FileFlowsLibraryRescanButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:
@@ -281,7 +281,7 @@ class FileFlowsTaskRunButton(
             manufacturer="FileFlows",
             model="Media Processing Server",
             sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get('port', 19200)}",
+            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
         )
 
     async def async_press(self) -> None:

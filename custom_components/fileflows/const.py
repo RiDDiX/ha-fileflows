@@ -15,7 +15,7 @@ CONF_USERNAME: Final = "username"
 CONF_PASSWORD: Final = "password"
 
 # Defaults
-DEFAULT_PORT: Final = 19200
+DEFAULT_PORT: Final = 8585  # Changed from 19200 to match common FileFlows installations
 DEFAULT_SSL: Final = False
 DEFAULT_VERIFY_SSL: Final = True
 DEFAULT_SCAN_INTERVAL: Final = timedelta(seconds=30)

@@ -103,17 +103,18 @@ A comprehensive Home Assistant integration for [FileFlows](https://fileflows.com
 
 During setup, you'll need:
 - **Host**: IP address or hostname of your FileFlows server
-- **Port**: Port number (default: 19200)
+- **Port**: Port number (default: 8585)
 - **SSL**: Enable if using HTTPS
 - **Verify SSL**: Disable for self-signed certificates
-- **Access Token**: Required if FileFlows authentication is enabled
+- **Username**: FileFlows username (optional - required for full API access)
+- **Password**: FileFlows password (optional - required for full API access)
 
-### Getting an Access Token
+### Authentication
 
-If your FileFlows server has authentication enabled:
-1. Go to FileFlows web UI
-2. Navigate to Settings → Security
-3. Generate an API access token
+The integration uses Bearer token authentication:
+- If credentials are provided, the integration will automatically login and obtain a Bearer token
+- Bearer tokens are cached for 23 hours and automatically renewed when needed
+- Without credentials, only public `/remote/*` endpoints are accessible (limited data)
 
 ## Example Dashboard Card
 
