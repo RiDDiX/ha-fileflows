@@ -46,6 +46,7 @@ API_WORKERS = "/api/worker"
 API_TASKS = "/api/task"
 API_PLUGINS = "/api/plugin"
 API_NVIDIA_SMI = "/api/nvidia/smi"
+API_STATISTICS_STORAGE_SAVED = "/api/statistics/storage-saved"
 
 
 class FileFlowsApiError(Exception):
@@ -421,19 +422,24 @@ class FileFlowsApi:
     
     # System Endpoints
     async def get_version(self) -> str:
-        """Gets the version of FileFlows."""
-        # Try public endpoint first
+        """Gets the version of FileFlows.
+
+        If credentials are available, uses /api/system/version.
+        Otherwise tries /remote/info/version.
+        """
+        # If we have credentials, use authenticated endpoint
+        if self._username and self._password:
+            try:
+                result = await self._get(API_SYSTEM_VERSION)
+                if isinstance(result, str):
+                    return result
+                return result.get("Version", "Unknown") if result else "Unknown"
+            except FileFlowsApiError:
+                pass  # Fall through to remote endpoint
+
+        # Try public endpoint
         version = await self.get_remote_version()
-        if version != "Unknown":
-            return version
-        # Fall back to authenticated endpoint
-        try:
-            result = await self._get(API_SYSTEM_VERSION)
-            if isinstance(result, str):
-                return result
-            return result.get("Version", "Unknown") if result else "Unknown"
-        except FileFlowsApiError:
-            return "Unknown"
+        return version if version != "Unknown" else "Unknown"
 
     async def get_system_info(self) -> dict[str, Any]:
         """Gets system information (memory, CPU)."""
@@ -690,6 +696,19 @@ class FileFlowsApi:
         except FileFlowsApiError:
             return {}
 
+    # Statistics Endpoints
+    async def get_storage_saved(self) -> dict[str, Any]:
+        """Get storage saved statistics from /api/statistics/storage-saved.
+
+        Returns aggregated storage savings data.
+        """
+        try:
+            result = await self._get(API_STATISTICS_STORAGE_SAVED)
+            return result if isinstance(result, dict) else {}
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get storage saved: %s", err)
+            return {}
+
     # =========================================================================
     # Combined Data Fetch for Coordinator
     # =========================================================================
@@ -718,24 +737,41 @@ class FileFlowsApi:
             "recently_finished": [],
             "library_file_status": {},
             "nvidia": {},
+            "storage_saved_stats": {},  # From /api/statistics/storage-saved
         }
 
         # =================================================================
-        # PUBLIC ENDPOINTS (no auth required) - These always work
+        # STATUS ENDPOINT - Use /api/status if auth available, else /remote/info/status
         # =================================================================
-        
-        # Remote status - primary source for queue/processing info
-        try:
-            data["remote_status"] = await self.get_remote_status()
-            _LOGGER.debug("Remote status: %s", data["remote_status"])
-        except FileFlowsApiError as err:
-            _LOGGER.warning("Could not get remote status: %s", err)
 
-        # Shrinkage groups (storage savings)
+        # Status - primary source for queue/processing info
         try:
-            data["shrinkage_groups"] = await self.get_remote_shrinkage()
+            # Use /api/status if we have credentials (more reliable)
+            if self._username and self._password:
+                _LOGGER.debug("Fetching status from /api/status (authenticated)")
+                data["remote_status"] = await self._get(API_STATUS, use_auth=True)
+            else:
+                _LOGGER.debug("Fetching status from /remote/info/status (public)")
+                data["remote_status"] = await self.get_remote_status()
+            _LOGGER.debug("Status data: %s", data["remote_status"])
         except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get shrinkage: %s", err)
+            _LOGGER.warning("Could not get status: %s", err)
+
+        # Storage savings - use /api/statistics/storage-saved if auth available
+        try:
+            if self._username and self._password:
+                _LOGGER.debug("Fetching storage savings from /api/statistics/storage-saved")
+                data["storage_saved_stats"] = await self.get_storage_saved()
+                # Also try old shrinkage endpoint for backward compatibility
+                try:
+                    data["shrinkage_groups"] = await self.get_remote_shrinkage()
+                except FileFlowsApiError:
+                    pass
+            else:
+                _LOGGER.debug("Fetching shrinkage from /remote/info/shrinkage-groups")
+                data["shrinkage_groups"] = await self.get_remote_shrinkage()
+        except FileFlowsApiError as err:
+            _LOGGER.debug("Could not get storage data: %s", err)
 
         # Update available
         try:

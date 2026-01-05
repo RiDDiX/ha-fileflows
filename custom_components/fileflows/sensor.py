@@ -180,12 +180,12 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
             "bytes_saved": c.storage_saved_bytes,
             "by_library": [
                 {
-                    "library": s.get("Library", "Unknown"),
-                    "original_gb": round(s.get("OriginalSize", 0) / (1024**3), 2),
-                    "final_gb": round(s.get("FinalSize", 0) / (1024**3), 2),
-                    "saved_gb": round((s.get("OriginalSize", 0) - s.get("FinalSize", 0)) / (1024**3), 2),
+                    "library": lib["library"],
+                    "items": lib["items"],
+                    "saved_gb": lib["savings_gb"],
+                    "final_gb": round(lib["final_size_bytes"] / (1024**3), 2),
                 }
-                for s in c.shrinkage_groups
+                for lib in c.storage_saved_by_library
             ],
         },
     ),

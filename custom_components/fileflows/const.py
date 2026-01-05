@@ -39,6 +39,15 @@ API_STATUS: Final = "/api/status"
 API_STATUS_UPDATE_AVAILABLE: Final = "/api/status/update-available"
 
 # =============================================================================
+# API Endpoints - Statistics
+# =============================================================================
+API_STATISTICS_STORAGE_SAVED: Final = "/api/statistics/storage-saved"
+API_STATISTICS_STORAGE_SAVED_RAW: Final = "/api/statistics/storage-saved-raw"
+API_STATISTICS_AVERAGE: Final = "/api/statistics/average/{name}"
+API_STATISTICS_RECORD_AVERAGE: Final = "/api/statistics/record-average"
+API_STATISTICS_CLEAR: Final = "/api/statistics/clear"
+
+# =============================================================================
 # API Endpoints - System
 # =============================================================================
 API_SYSTEM_VERSION: Final = "/api/system/version"

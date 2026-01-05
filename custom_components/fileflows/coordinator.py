@@ -282,7 +282,7 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Get unprocessed files count."""
         # Use queue from remote_status as primary (public endpoint)
         queue = self.queue_from_remote
-        if queue > 0:
+        if queue is not None and queue >= 0:
             return queue
         # Fall back to library_file_status (authenticated)
         return self.library_file_status.get("Unprocessed", 0)
@@ -292,7 +292,7 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Get processed files count."""
         # Use processed from remote_status as primary
         processed = self.processed_from_remote
-        if processed > 0:
+        if processed is not None and processed >= 0:
             return processed
         # Fall back to library_file_status
         return self.library_file_status.get("Processed", 0)
@@ -302,7 +302,7 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Get processing files count."""
         # Use processing from remote_status as primary
         processing = self.processing_from_remote
-        if processing > 0:
+        if processing is not None and processing >= 0:
             return processing
         # Or count processingFiles
         pf = self.processing_files
@@ -334,12 +334,12 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def queue_size(self) -> int:
         """Get total queue size.
-        
-        Uses queue from public remote_status endpoint as primary source.
+
+        Uses queue from remote_status endpoint as primary source.
         """
         # Remote status queue is the authoritative source
         queue = self.queue_from_remote
-        if queue > 0:
+        if queue is not None and queue >= 0:
             return queue
         # Fall back to unprocessed + processing from library_file_status
         return self.files_unprocessed + self.files_processing
@@ -358,16 +358,47 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self.data.get("recently_finished", []) if self.data else []
 
     # =========================================================================
-    # Shrinkage Properties
+    # Shrinkage Properties (legacy /remote/info/shrinkage-groups)
     # =========================================================================
     @property
     def shrinkage_groups(self) -> list[dict[str, Any]]:
-        """Get shrinkage data grouped by library."""
+        """Get shrinkage data grouped by library from legacy endpoint."""
         return self.data.get("shrinkage_groups", []) if self.data else []
+
+    # =========================================================================
+    # Storage Savings Properties (from /api/statistics/storage-saved)
+    # =========================================================================
+    @property
+    def storage_saved_stats(self) -> dict[str, Any]:
+        """Get storage saved statistics from /api/statistics/storage-saved.
+
+        Returns: {
+            series: [{name: "Final Size", data: [...]}, {name: "Savings", data: [...]}, ...],
+            labels: ["Library1", "Library2", "Total"],
+            items: [count1, count2, totalCount]
+        }
+        """
+        return self.data.get("storage_saved_stats", {}) if self.data else {}
 
     @property
     def storage_saved_bytes(self) -> int:
-        """Get total storage saved in bytes."""
+        """Get total storage saved in bytes.
+
+        Uses /api/statistics/storage-saved if available (more reliable),
+        falls back to shrinkage_groups if not.
+        """
+        # Try new endpoint first
+        stats = self.storage_saved_stats
+        if stats and "series" in stats and "labels" in stats:
+            # Find "Savings" series
+            for series in stats.get("series", []):
+                if series.get("name") == "Savings":
+                    # Last element in data array is the Total
+                    savings_data = series.get("data", [])
+                    if savings_data:
+                        return savings_data[-1]  # Total is last element
+
+        # Fall back to legacy shrinkage_groups
         total = 0
         for item in self.shrinkage_groups:
             original = item.get("OriginalSize", 0)
@@ -383,7 +414,30 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def storage_saved_percent(self) -> float:
-        """Get storage saved percentage."""
+        """Get storage saved percentage.
+
+        Uses /api/statistics/storage-saved if available,
+        falls back to shrinkage_groups calculation if not.
+        """
+        # Try new endpoint first
+        stats = self.storage_saved_stats
+        if stats and "series" in stats:
+            final_size = 0
+            savings = 0
+
+            for series in stats.get("series", []):
+                if series.get("name") == "Final Size":
+                    data = series.get("data", [])
+                    final_size = data[-1] if data else 0
+                elif series.get("name") == "Savings":
+                    data = series.get("data", [])
+                    savings = data[-1] if data else 0
+
+            if final_size > 0 and savings > 0:
+                total_original = final_size + savings
+                return round((savings / total_original) * 100, 1)
+
+        # Fall back to legacy calculation
         total_original = 0
         total_final = 0
         for item in self.shrinkage_groups:
@@ -393,6 +447,69 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if total_original > 0:
             return round(((total_original - total_final) / total_original) * 100, 1)
         return 0.0
+
+    @property
+    def storage_saved_by_library(self) -> list[dict[str, Any]]:
+        """Get storage savings broken down by library.
+
+        Returns: [
+            {
+                "library": "Library Name",
+                "items": 123,
+                "final_size_bytes": 4387058326945,
+                "savings_bytes": 1439824444369,
+                "increase_bytes": 0,
+                "savings_gb": 1340.56,
+            },
+            ...
+        ]
+        """
+        stats = self.storage_saved_stats
+        if not stats or "series" not in stats or "labels" not in stats:
+            # Fall back to legacy shrinkage_groups
+            return [
+                {
+                    "library": s.get("Library", "Unknown"),
+                    "items": 0,  # Not available in legacy data
+                    "final_size_bytes": s.get("FinalSize", 0),
+                    "savings_bytes": s.get("OriginalSize", 0) - s.get("FinalSize", 0),
+                    "increase_bytes": 0,
+                    "savings_gb": round((s.get("OriginalSize", 0) - s.get("FinalSize", 0)) / (1024**3), 2),
+                }
+                for s in self.shrinkage_groups
+            ]
+
+        # Parse new endpoint data
+        labels = stats.get("labels", [])
+        items_counts = stats.get("items", [])
+
+        final_size_data = []
+        savings_data = []
+        increase_data = []
+
+        for series in stats.get("series", []):
+            name = series.get("name")
+            data = series.get("data", [])
+            if name == "Final Size":
+                final_size_data = data
+            elif name == "Savings":
+                savings_data = data
+            elif name == "Increase":
+                increase_data = data
+
+        # Combine into list of dicts (exclude "Total" - it's the last element)
+        result = []
+        for i, label in enumerate(labels[:-1]):  # Skip last "Total" label
+            result.append({
+                "library": label,
+                "items": items_counts[i] if i < len(items_counts) else 0,
+                "final_size_bytes": final_size_data[i] if i < len(final_size_data) else 0,
+                "savings_bytes": savings_data[i] if i < len(savings_data) else 0,
+                "increase_bytes": increase_data[i] if i < len(increase_data) else 0,
+                "savings_gb": round((savings_data[i] if i < len(savings_data) else 0) / (1024**3), 2),
+            })
+
+        return result
 
     # =========================================================================
     # Task Properties

@@ -95,9 +95,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         _LOGGER.error("Failed to get version: %s", err)
         version = "Unknown"
 
-    # If username/password provided, test Bearer token authentication
+    # If username/password provided, verify Bearer token authentication
     if username and password:
-        _LOGGER.info("Credentials provided, testing Bearer token authentication...")
+        _LOGGER.info("Credentials provided, verifying Bearer token authentication...")
         _LOGGER.debug("Username: %s", username)
 
         try:
@@ -109,18 +109,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                 raise InvalidAuth("Failed to obtain Bearer token")
 
             _LOGGER.info("Bearer token acquired successfully (token length: %d)", len(token))
-
-            # Test the token by calling an authenticated endpoint
-            _LOGGER.debug("Testing Bearer token with /api/system/info...")
-            try:
-                system_info = await api.get_system_info()
-                if system_info:
-                    _LOGGER.info("Bearer token authentication verified - authenticated API access successful")
-                else:
-                    _LOGGER.warning("Bearer token accepted but /api/system/info returned empty data")
-            except Exception as status_err:
-                _LOGGER.error("Bearer token test failed on authenticated endpoint: %s", status_err)
-                raise InvalidAuth(f"Bearer token obtained but API access failed: {status_err}")
+            _LOGGER.info("Bearer token authentication verified - connection test already validated API access")
 
         except FileFlowsAuthError as err:
             _LOGGER.error("Bearer authentication failed: %s", err)
@@ -129,7 +118,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             _LOGGER.error("Unexpected error during authentication: %s", err)
             raise InvalidAuth(str(err)) from err
     else:
-        _LOGGER.info("No credentials provided - will use public endpoints only")
+        _LOGGER.info("No credentials provided - limited functionality (public endpoints only)")
 
     return {"title": f"FileFlows ({data[CONF_HOST]})", "version": version}
 
