@@ -1,8 +1,9 @@
-"""FileFlows API Client - Built to match Fenrus implementation."""
+"""FileFlows API Client with Bearer Token Authentication."""
 from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -10,7 +11,8 @@ from aiohttp import ClientError, ClientResponseError, ClientTimeout
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = ClientTimeout(total=30)
+DEFAULT_TIMEOUT = ClientTimeout(total=10)
+TOKEN_EXPIRY_BUFFER = timedelta(minutes=5)  # Refresh token 5 minutes before expiry
 
 
 class FileFlowsApiError(Exception):
@@ -26,7 +28,11 @@ class FileFlowsAuthError(FileFlowsApiError):
 
 
 class FileFlowsApi:
-    """FileFlows API Client - Matching Fenrus implementation."""
+    """FileFlows API Client with automatic Bearer token authentication.
+
+    Supports both authenticated (/api/*) and public (/remote/info/*) endpoints.
+    Automatically handles Bearer token login, caching, and refresh.
+    """
 
     def __init__(
         self,
@@ -34,24 +40,44 @@ class FileFlowsApi:
         port: int = 19200,
         ssl: bool = False,
         verify_ssl: bool = True,
-        access_token: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         session: aiohttp.ClientSession | None = None,
     ) -> None:
-        """Initialize the API client."""
+        """Initialize the API client.
+
+        Args:
+            host: FileFlows server hostname/IP
+            port: FileFlows server port
+            ssl: Use HTTPS
+            verify_ssl: Verify SSL certificates
+            username: FileFlows username (optional, for authenticated endpoints)
+            password: FileFlows password (optional, for authenticated endpoints)
+            session: Existing aiohttp session (optional)
+        """
         self._host = host
         self._port = port
         self._ssl = ssl
         self._verify_ssl = verify_ssl
-        # Store token, but empty string should be treated as None
-        self._access_token = access_token if access_token else None
+        self._username = username if username else None
+        self._password = password if password else None
         self._session = session
         self._close_session = False
 
-        # Build base URL - ensure it ends with /
+        # Bearer token management
+        self._bearer_token: str | None = None
+        self._token_expiry: datetime | None = None
+
+        # Build base URL
         protocol = "https" if ssl else "http"
         self._base_url = f"{protocol}://{host}:{port}/"
-        
-        _LOGGER.debug("FileFlows API initialized: %s", self._base_url)
+
+        auth_mode = "authenticated" if (username and password) else "public"
+        _LOGGER.info(
+            "FileFlows API initialized: %s (mode: %s)",
+            self._base_url,
+            auth_mode,
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -70,49 +96,109 @@ class FileFlowsApi:
             await self._session.close()
             self._session = None
 
-    async def _fetch(self, endpoint: str, method: str = "GET", json_data: Any = None) -> Any:
+    async def _get_bearer_token(self) -> str | None:
+        """Get Bearer token, login if needed.
+
+        Returns:
+            Bearer token string or None if auth not configured
         """
-        Fetch data from FileFlows - matching Fenrus implementation.
-        
-        Fenrus code:
-        ```javascript
-        fetch(args, url) {
-            let prefix = args.url;
-            if(prefix.endsWith('/') === false)
-                prefix += '/';
-            url = prefix + url;
-            if(!args.properties["apiToken"])
-                return args.fetch(url).data;
-            return args.fetch({
-                url: url,
-                method: 'GET',
-                headers: {
-                    'x-token': args.properties['apiToken']                
-                }            
-            }).data;
+        # Check if we have credentials
+        if not self._username or not self._password:
+            return None
+
+        # Check if current token is still valid
+        if self._bearer_token and self._token_expiry:
+            if datetime.now() < self._token_expiry - TOKEN_EXPIRY_BUFFER:
+                return self._bearer_token
+
+        # Need to login
+        _LOGGER.debug("Acquiring new Bearer token for user: %s", self._username)
+
+        session = await self._get_session()
+        auth_url = f"{self._base_url}authorize"
+        auth_data = {
+            "username": self._username,
+            "password": self._password,
         }
-        ```
+
+        try:
+            async with session.post(
+                auth_url,
+                json=auth_data,
+                headers={"Content-Type": "application/json"},
+                timeout=DEFAULT_TIMEOUT,
+            ) as response:
+                if response.status == 200:
+                    token = await response.text()
+                    # Remove quotes if present
+                    token = token.strip('"')
+
+                    self._bearer_token = token
+                    # Assume token valid for 24 hours (typical JWT expiry)
+                    self._token_expiry = datetime.now() + timedelta(hours=24)
+
+                    _LOGGER.info("Bearer token acquired successfully")
+                    return self._bearer_token
+                else:
+                    error_text = await response.text()
+                    _LOGGER.error(
+                        "Authentication failed: %s - %s",
+                        response.status,
+                        error_text,
+                    )
+                    raise FileFlowsAuthError(
+                        f"Authentication failed: {response.status}"
+                    )
+
+        except ClientError as err:
+            _LOGGER.error("Connection error during authentication: %s", err)
+            raise FileFlowsConnectionError(f"Auth connection failed: {err}") from err
+        except asyncio.TimeoutError as err:
+            _LOGGER.error("Authentication timeout")
+            raise FileFlowsConnectionError("Auth timeout") from err
+
+    async def _fetch(
+        self,
+        endpoint: str,
+        method: str = "GET",
+        json_data: Any = None,
+        require_auth: bool = True,
+    ) -> Any:
+        """Fetch data from FileFlows with automatic Bearer auth.
+
+        Args:
+            endpoint: API endpoint (without leading slash)
+            method: HTTP method
+            json_data: JSON payload for POST/PUT requests
+            require_auth: Whether this endpoint requires authentication
+
+        Returns:
+            Parsed JSON response or text
         """
         session = await self._get_session()
-        
-        # Build URL - endpoint should NOT have leading slash (like Fenrus)
+
         # Remove leading slash if present
         if endpoint.startswith("/"):
             endpoint = endpoint[1:]
-        
+
         url = f"{self._base_url}{endpoint}"
-        
-        _LOGGER.debug("Fetching: %s %s", method, url)
-        
-        # Build headers - EXACTLY like Fenrus
-        # Fenrus only adds x-token header, nothing else for GET
+
+        # Build headers
         headers: dict[str, str] = {}
-        
-        if self._access_token:
-            headers["x-token"] = self._access_token
-            _LOGGER.debug("Using x-token authentication")
-        
-        # Only add Content-Type for requests with body
+
+        # Add Bearer token if auth required and configured
+        if require_auth:
+            try:
+                token = await self._get_bearer_token()
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                    _LOGGER.debug("Using Bearer auth for: %s", endpoint)
+                else:
+                    _LOGGER.debug("No auth configured for: %s", endpoint)
+            except FileFlowsAuthError:
+                _LOGGER.warning("Auth failed, trying without auth for: %s", endpoint)
+
+        # Add Content-Type for requests with body
         if json_data is not None:
             headers["Content-Type"] = "application/json"
 
@@ -124,16 +210,30 @@ class FileFlowsApi:
                 headers=headers if headers else None,
                 timeout=DEFAULT_TIMEOUT,
             ) as response:
-                _LOGGER.debug("Response: %s %s", response.status, response.reason)
-                
+                _LOGGER.debug(
+                    "%s %s -> %s %s",
+                    method,
+                    endpoint,
+                    response.status,
+                    response.reason,
+                )
+
+                # Handle auth errors
                 if response.status == 401:
+                    # Token might be expired, clear it and retry once
+                    if self._bearer_token and require_auth:
+                        _LOGGER.warning("Token expired, clearing and will retry")
+                        self._bearer_token = None
+                        self._token_expiry = None
                     raise FileFlowsAuthError("Authentication failed (401)")
+
                 if response.status == 403:
                     raise FileFlowsAuthError("Access forbidden (403)")
+
                 if response.status == 404:
                     _LOGGER.debug("Endpoint not found: %s", endpoint)
                     return None
-                
+
                 response.raise_for_status()
 
                 # Handle empty responses
@@ -143,7 +243,7 @@ class FileFlowsApi:
                 text = await response.text()
                 if not text:
                     return None
-                
+
                 # Try to parse as JSON
                 try:
                     import json
@@ -162,131 +262,159 @@ class FileFlowsApi:
             raise FileFlowsConnectionError("Request timeout") from err
 
     # =========================================================================
-    # Connection Test - Uses PUBLIC endpoint (exactly like Fenrus test method)
+    # Connection Test
     # =========================================================================
     async def test_connection(self) -> bool:
-        """
-        Test connection to FileFlows.
-        
-        Fenrus test method:
-        ```javascript
-        test(args){        
-            let data = this.fetch(args, 'remote/info/status');
-            args.log('data: ' + (data === null ? 'null' : JSON.stringify(data)));
-            return isNaN(data.processed) === false;          
-        }
-        ```
+        """Test connection to FileFlows.
+
+        Tries authenticated endpoint first, falls back to public endpoint.
         """
         try:
-            data = await self._fetch("remote/info/status")
-            _LOGGER.debug("Test connection data: %s", data)
-            
-            if data is None:
-                _LOGGER.error("Test connection: No data returned")
-                return False
-            
-            # Fenrus checks: isNaN(data.processed) === false
-            # So we check if 'processed' is a number
-            if isinstance(data, dict):
-                processed = data.get("processed")
-                if processed is not None and isinstance(processed, (int, float)):
-                    _LOGGER.info("Test connection successful - processed: %s", processed)
+            # Try /api/status first (authenticated)
+            data = await self._fetch("api/status", require_auth=True)
+            if data and isinstance(data, dict):
+                if "queue" in data or "processing" in data:
+                    _LOGGER.info("Connection test successful (authenticated)")
                     return True
-                # Also accept if queue is present
-                queue = data.get("queue")
-                if queue is not None and isinstance(queue, (int, float)):
-                    _LOGGER.info("Test connection successful - queue: %s", queue)
-                    return True
-            
-            _LOGGER.error("Test connection: Invalid data format")
-            return False
-            
         except Exception as err:
-            _LOGGER.error("Test connection failed: %s", err)
-            return False
+            _LOGGER.debug("Authenticated test failed, trying public: %s", err)
+
+        try:
+            # Fall back to public endpoint
+            data = await self._fetch("remote/info/status", require_auth=False)
+            if data and isinstance(data, dict):
+                if "queue" in data or "processing" in data:
+                    _LOGGER.info("Connection test successful (public)")
+                    return True
+        except Exception as err:
+            _LOGGER.error("Connection test failed: %s", err)
+
+        return False
 
     # =========================================================================
-    # PUBLIC Endpoints (/remote/info/*) - No auth required
-    # These are the same endpoints Fenrus uses
+    # Public Endpoints (/remote/info/*) - Fallback when no auth
     # =========================================================================
-    
     async def get_remote_status(self) -> dict[str, Any]:
-        """
-        Get status from public endpoint.
-        
-        Fenrus: this.fetch(args, 'remote/info/status')
-        Returns: {queue, processing, processed, time, processingFiles[]}
-        """
-        result = await self._fetch("remote/info/status")
+        """Get status from public endpoint (fallback)."""
+        result = await self._fetch("remote/info/status", require_auth=False)
         return result if isinstance(result, dict) else {}
 
     async def get_remote_shrinkage(self) -> list[dict[str, Any]]:
-        """
-        Get shrinkage groups from public endpoint.
-        
-        Fenrus: this.fetch(args, 'remote/info/shrinkage-groups')
-        Returns: [{Library, OriginalSize, FinalSize}, ...]
-        """
-        result = await self._fetch("remote/info/shrinkage-groups")
+        """Get shrinkage from public endpoint (fallback)."""
+        result = await self._fetch("remote/info/shrinkage-groups", require_auth=False)
         return result if isinstance(result, list) else []
 
     async def get_remote_update_available(self) -> bool:
-        """
-        Check if update is available.
-        
-        Fenrus: this.fetch(args, 'remote/info/update-available')
-        Returns: {UpdateAvailable: bool}
-        """
+        """Check update from public endpoint (fallback)."""
         try:
-            result = await self._fetch("remote/info/update-available")
+            result = await self._fetch("remote/info/update-available", require_auth=False)
             if isinstance(result, dict):
                 return result.get("UpdateAvailable", False) is True
             return False
         except FileFlowsApiError:
             return False
 
+    # =========================================================================
+    # Authenticated Endpoints (/api/*) - Primary source when auth available
+    # =========================================================================
+
+    async def get_status(self) -> dict[str, Any]:
+        """Get comprehensive status from /api/status (authenticated).
+
+        Returns queue, processing, processed, time, processingFiles, and more.
+        """
+        try:
+            result = await self._fetch("api/status")
+            return result if isinstance(result, dict) else {}
+        except FileFlowsApiError:
+            return {}
+
+    async def get_system_info(self) -> dict[str, Any]:
+        """Get system info (CPU, Memory, etc.) from /api/system/info."""
+        try:
+            result = await self._fetch("api/system")
+            return result if isinstance(result, dict) else {}
+        except FileFlowsApiError:
+            return {}
+
     async def get_version(self) -> str:
         """Get FileFlows version."""
         try:
-            # Try public endpoint first
-            result = await self._fetch("remote/info/version")
-            if isinstance(result, str):
-                return result
-            if isinstance(result, dict):
-                return result.get("Version", "Unknown")
-            
-            # Fall back to authenticated endpoint
             result = await self._fetch("api/system/version")
             if isinstance(result, str):
                 return result
             if isinstance(result, dict):
                 return result.get("Version", "Unknown")
-            
             return "Unknown"
         except FileFlowsApiError:
             return "Unknown"
 
-    # =========================================================================
-    # AUTHENTICATED Endpoints (/api/*) - Require x-token if auth enabled
-    # =========================================================================
-
-    async def get_system_info(self) -> dict[str, Any]:
-        """Get system information (memory, CPU)."""
+    # Nodes
+    async def get_nodes(self) -> list[dict[str, Any]]:
+        """Get all processing nodes."""
         try:
-            result = await self._fetch("api/system/info")
-            return result if isinstance(result, dict) else {}
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get system info: %s", err)
-            return {}
+            result = await self._fetch("api/node")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
 
-    async def get_fileflows_status(self) -> dict[str, Any]:
-        """Get FileFlows status."""
+    # Libraries
+    async def get_libraries(self) -> list[dict[str, Any]]:
+        """Get all libraries."""
         try:
-            result = await self._fetch("api/settings/fileflows-status")
-            return result if isinstance(result, dict) else {}
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get fileflows status: %s", err)
-            return {}
+            result = await self._fetch("api/library")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
+
+    # Flows
+    async def get_flows(self) -> list[dict[str, Any]]:
+        """Get all flows."""
+        try:
+            result = await self._fetch("api/flow")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
+
+    # Plugins
+    async def get_plugins(self) -> list[dict[str, Any]]:
+        """Get all plugins."""
+        try:
+            result = await self._fetch("api/plugin")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
+
+    # Tasks
+    async def get_tasks(self) -> list[dict[str, Any]]:
+        """Get all scheduled tasks."""
+        try:
+            result = await self._fetch("api/task")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
+
+    # Library Files
+    async def get_library_file_status(self) -> list[dict[str, Any]]:
+        """Get library file status."""
+        try:
+            result = await self._fetch("api/library-file/status")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
+
+    # NVIDIA
+    async def get_nvidia_smi(self) -> list[dict[str, Any]]:
+        """Get NVIDIA GPU info."""
+        try:
+            result = await self._fetch("api/nvidia/smi")
+            return result if isinstance(result, list) else []
+        except FileFlowsApiError:
+            return []
+
+    # =========================================================================
+    # Control Endpoints
+    # =========================================================================
 
     async def pause_system(self, minutes: int = 0) -> bool:
         """Pause the system."""
@@ -316,62 +444,6 @@ class FileFlowsApi:
             _LOGGER.error("Failed to restart: %s", err)
             return False
 
-    # Node Endpoints
-    async def get_nodes(self) -> list[dict[str, Any]]:
-        """Get all processing nodes."""
-        try:
-            result = await self._fetch("api/node")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get nodes: %s", err)
-            return []
-
-    async def set_node_state(self, uid: str, enabled: bool) -> bool:
-        """Set state of a processing node."""
-        try:
-            state = "true" if enabled else "false"
-            await self._fetch(f"api/node/state/{uid}?enable={state}", method="PUT")
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to set node state: %s", err)
-            return False
-
-    async def enable_node(self, uid: str) -> bool:
-        """Enable a processing node."""
-        return await self.set_node_state(uid, True)
-
-    async def disable_node(self, uid: str) -> bool:
-        """Disable a processing node."""
-        return await self.set_node_state(uid, False)
-
-    # Library Endpoints
-    async def get_libraries(self) -> list[dict[str, Any]]:
-        """Get all libraries."""
-        try:
-            result = await self._fetch("api/library")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get libraries: %s", err)
-            return []
-
-    async def set_library_state(self, uid: str, enabled: bool) -> bool:
-        """Set library state."""
-        try:
-            state = "true" if enabled else "false"
-            await self._fetch(f"api/library/state/{uid}?enable={state}", method="PUT")
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to set library state: %s", err)
-            return False
-
-    async def enable_library(self, uid: str) -> bool:
-        """Enable a library."""
-        return await self.set_library_state(uid, True)
-
-    async def disable_library(self, uid: str) -> bool:
-        """Disable a library."""
-        return await self.set_library_state(uid, False)
-
     async def rescan_libraries(self, uids: list[str] | None = None) -> bool:
         """Rescan libraries."""
         try:
@@ -388,254 +460,109 @@ class FileFlowsApi:
         """Rescan all enabled libraries."""
         return await self.rescan_libraries()
 
-    # Library File Endpoints
-    async def get_library_file_status(self) -> dict[str, Any]:
-        """Get library file status overview."""
-        try:
-            result = await self._fetch("api/library-file/status")
-            return result if isinstance(result, dict) else {}
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get library file status: %s", err)
-            return {}
-
-    async def get_upcoming_files(self) -> list[dict[str, Any]]:
-        """Get next 10 upcoming files."""
-        try:
-            result = await self._fetch("api/library-file/upcoming")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get upcoming files: %s", err)
-            return []
-
-    async def get_recently_finished(self) -> list[dict[str, Any]]:
-        """Get last 10 finished files."""
-        try:
-            result = await self._fetch("api/library-file/recently-finished")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get recently finished: %s", err)
-            return []
-
-    async def reprocess_files(self, uids: list[str]) -> bool:
-        """Reprocess library files."""
-        try:
-            await self._fetch("api/library-file/reprocess", method="POST", json_data=uids)
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to reprocess: %s", err)
-            return False
-
-    async def reprocess_file(self, uid: str) -> bool:
-        """Reprocess a single file."""
-        return await self.reprocess_files([uid])
-
-    async def unhold_files(self, uids: list[str]) -> bool:
-        """Unhold library files."""
-        try:
-            await self._fetch("api/library-file/unhold", method="POST", json_data=uids)
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to unhold: %s", err)
-            return False
-
-    # Flow Endpoints
-    async def get_flows(self) -> list[dict[str, Any]]:
-        """Get all flows."""
-        try:
-            result = await self._fetch("api/flow")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get flows: %s", err)
-            return []
-
-    async def set_flow_state(self, uid: str, enabled: bool) -> bool:
-        """Set flow state."""
-        try:
-            state = "true" if enabled else "false"
-            await self._fetch(f"api/flow/state/{uid}?enable={state}", method="PUT")
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to set flow state: %s", err)
-            return False
-
-    async def enable_flow(self, uid: str) -> bool:
-        """Enable a flow."""
-        return await self.set_flow_state(uid, True)
-
-    async def disable_flow(self, uid: str) -> bool:
-        """Disable a flow."""
-        return await self.set_flow_state(uid, False)
-
-    # Worker Endpoints
-    async def get_workers(self) -> list[dict[str, Any]]:
-        """Get all running workers."""
-        try:
-            result = await self._fetch("api/worker")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get workers: %s", err)
-            return []
-
-    async def abort_worker(self, uid: str) -> bool:
-        """Abort a worker."""
-        try:
-            await self._fetch(f"api/worker/{uid}", method="DELETE")
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to abort worker: %s", err)
-            return False
-
-    async def abort_worker_by_file(self, file_uid: str) -> bool:
-        """Abort worker by file UID."""
-        try:
-            await self._fetch(f"api/worker/by-file/{file_uid}", method="DELETE")
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to abort worker by file: %s", err)
-            return False
-
-    # Task Endpoints
-    async def get_tasks(self) -> list[dict[str, Any]]:
-        """Get all scheduled tasks."""
-        try:
-            result = await self._fetch("api/task")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get tasks: %s", err)
-            return []
-
-    async def run_task(self, uid: str) -> bool:
-        """Run a task."""
-        try:
-            await self._fetch(f"api/task/run/{uid}", method="POST")
-            return True
-        except FileFlowsApiError as err:
-            _LOGGER.error("Failed to run task: %s", err)
-            return False
-
-    # Plugin Endpoints
-    async def get_plugins(self) -> list[dict[str, Any]]:
-        """Get all plugins."""
-        try:
-            result = await self._fetch("api/plugin")
-            return result if isinstance(result, list) else []
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get plugins: %s", err)
-            return []
-
-    # NVIDIA Endpoints
-    async def get_nvidia_smi(self) -> dict[str, Any]:
-        """Get NVIDIA SMI data."""
-        try:
-            result = await self._fetch("api/nvidia/smi")
-            return result if isinstance(result, dict) else {}
-        except FileFlowsApiError:
-            return {}
-
     # =========================================================================
-    # Combined Data Fetch for Coordinator
+    # Combined Data Fetch - Smart fallback
     # =========================================================================
     async def get_all_data(self) -> dict[str, Any]:
-        """Get all data needed for sensors."""
+        """Get all data with smart fallback between authenticated and public APIs.
+
+        If username/password configured: Use /api/* endpoints (full data)
+        Otherwise: Use /remote/info/* endpoints (basic monitoring)
+        """
+        has_auth = bool(self._username and self._password)
+
+        if has_auth:
+            _LOGGER.debug("Fetching data using authenticated endpoints")
+            return await self._get_authenticated_data()
+        else:
+            _LOGGER.debug("Fetching data using public endpoints")
+            return await self._get_public_data()
+
+    async def _get_authenticated_data(self) -> dict[str, Any]:
+        """Fetch all data from authenticated /api/* endpoints."""
+        data: dict[str, Any] = {
+            "status": {},
+            "system_info": {},
+            "nodes": [],
+            "libraries": [],
+            "flows": [],
+            "plugins": [],
+            "tasks": [],
+            "library_file_status": [],
+            "nvidia": [],
+            "version": "Unknown",
+        }
+
+        try:
+            results = await asyncio.gather(
+                self.get_status(),
+                self.get_system_info(),
+                self.get_nodes(),
+                self.get_libraries(),
+                self.get_flows(),
+                self.get_plugins(),
+                self.get_tasks(),
+                self.get_library_file_status(),
+                self.get_nvidia_smi(),
+                self.get_version(),
+                return_exceptions=True,
+            )
+
+            # Process results
+            if not isinstance(results[0], Exception):
+                data["status"] = results[0]
+            if not isinstance(results[1], Exception):
+                data["system_info"] = results[1]
+            if not isinstance(results[2], Exception):
+                data["nodes"] = results[2]
+            if not isinstance(results[3], Exception):
+                data["libraries"] = results[3]
+            if not isinstance(results[4], Exception):
+                data["flows"] = results[4]
+            if not isinstance(results[5], Exception):
+                data["plugins"] = results[5]
+            if not isinstance(results[6], Exception):
+                data["tasks"] = results[6]
+            if not isinstance(results[7], Exception):
+                data["library_file_status"] = results[7]
+            if not isinstance(results[8], Exception):
+                data["nvidia"] = results[8]
+            if not isinstance(results[9], Exception):
+                data["version"] = results[9]
+
+        except Exception as err:
+            _LOGGER.error("Error fetching authenticated data: %s", err)
+
+        return data
+
+    async def _get_public_data(self) -> dict[str, Any]:
+        """Fetch data from public /remote/info/* endpoints (fallback)."""
         data: dict[str, Any] = {
             "remote_status": {},
             "shrinkage_groups": [],
             "update_available": False,
             "version": "Unknown",
-            "system_info": {},
-            "fileflows_status": {},
-            "nodes": [],
-            "libraries": [],
-            "flows": [],
-            "workers": [],
-            "tasks": [],
-            "plugins": [],
-            "upcoming_files": [],
-            "recently_finished": [],
-            "library_file_status": {},
-            "nvidia": {},
         }
 
-        # PUBLIC endpoints (always work)
         try:
-            data["remote_status"] = await self.get_remote_status()
-        except Exception as err:
-            _LOGGER.warning("Could not get remote status: %s", err)
+            results = await asyncio.gather(
+                self.get_remote_status(),
+                self.get_remote_shrinkage(),
+                self.get_remote_update_available(),
+                self.get_version(),
+                return_exceptions=True,
+            )
 
-        try:
-            data["shrinkage_groups"] = await self.get_remote_shrinkage()
-        except Exception as err:
-            _LOGGER.debug("Could not get shrinkage: %s", err)
+            if not isinstance(results[0], Exception):
+                data["remote_status"] = results[0]
+            if not isinstance(results[1], Exception):
+                data["shrinkage_groups"] = results[1]
+            if not isinstance(results[2], Exception):
+                data["update_available"] = results[2]
+            if not isinstance(results[3], Exception):
+                data["version"] = results[3]
 
-        try:
-            data["update_available"] = await self.get_remote_update_available()
         except Exception as err:
-            _LOGGER.debug("Could not get update info: %s", err)
-
-        try:
-            data["version"] = await self.get_version()
-        except Exception as err:
-            _LOGGER.debug("Could not get version: %s", err)
-
-        # AUTHENTICATED endpoints
-        try:
-            data["system_info"] = await self.get_system_info()
-        except Exception as err:
-            _LOGGER.debug("Could not get system info: %s", err)
-
-        try:
-            data["fileflows_status"] = await self.get_fileflows_status()
-        except Exception as err:
-            _LOGGER.debug("Could not get fileflows status: %s", err)
-
-        try:
-            data["nodes"] = await self.get_nodes()
-        except Exception as err:
-            _LOGGER.debug("Could not get nodes: %s", err)
-
-        try:
-            data["libraries"] = await self.get_libraries()
-        except Exception as err:
-            _LOGGER.debug("Could not get libraries: %s", err)
-
-        try:
-            data["flows"] = await self.get_flows()
-        except Exception as err:
-            _LOGGER.debug("Could not get flows: %s", err)
-
-        try:
-            data["workers"] = await self.get_workers()
-        except Exception as err:
-            _LOGGER.debug("Could not get workers: %s", err)
-
-        try:
-            data["tasks"] = await self.get_tasks()
-        except Exception as err:
-            _LOGGER.debug("Could not get tasks: %s", err)
-
-        try:
-            data["plugins"] = await self.get_plugins()
-        except Exception as err:
-            _LOGGER.debug("Could not get plugins: %s", err)
-
-        try:
-            data["library_file_status"] = await self.get_library_file_status()
-        except Exception as err:
-            _LOGGER.debug("Could not get library file status: %s", err)
-
-        try:
-            data["upcoming_files"] = await self.get_upcoming_files()
-        except Exception as err:
-            _LOGGER.debug("Could not get upcoming files: %s", err)
-
-        try:
-            data["recently_finished"] = await self.get_recently_finished()
-        except Exception as err:
-            _LOGGER.debug("Could not get recently finished: %s", err)
-
-        try:
-            data["nvidia"] = await self.get_nvidia_smi()
-        except Exception as err:
-            _LOGGER.debug("Could not get nvidia info: %s", err)
+            _LOGGER.error("Error fetching public data: %s", err)
 
         return data

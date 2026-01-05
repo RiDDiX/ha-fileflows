@@ -14,7 +14,9 @@ from homeassistant.data_entry_flow import FlowResult
 from .api import FileFlowsApi, FileFlowsApiError, FileFlowsAuthError, FileFlowsConnectionError
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_PASSWORD,
     CONF_SSL,
+    CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_PORT,
     DEFAULT_SSL,
@@ -30,7 +32,8 @@ def get_schema(
     port: int = DEFAULT_PORT,
     ssl: bool = DEFAULT_SSL,
     verify_ssl: bool = DEFAULT_VERIFY_SSL,
-    access_token: str = "",
+    username: str = "",
+    password: str = "",
 ) -> vol.Schema:
     """Get the config schema."""
     return vol.Schema(
@@ -39,7 +42,8 @@ def get_schema(
             vol.Required(CONF_PORT, default=port): int,
             vol.Required(CONF_SSL, default=ssl): bool,
             vol.Required(CONF_VERIFY_SSL, default=verify_ssl): bool,
-            vol.Optional(CONF_ACCESS_TOKEN, default=access_token): str,
+            vol.Optional(CONF_USERNAME, default=username): str,
+            vol.Optional(CONF_PASSWORD, default=password): str,
         }
     )
 
@@ -52,7 +56,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         port=data.get(CONF_PORT, DEFAULT_PORT),
         ssl=data.get(CONF_SSL, DEFAULT_SSL),
         verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        access_token=data.get(CONF_ACCESS_TOKEN),
+        username=data.get(CONF_USERNAME),
+        password=data.get(CONF_PASSWORD),
     )
 
     try:
