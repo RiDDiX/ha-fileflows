@@ -211,9 +211,9 @@ class FileFlowsApi:
         session = await self._get_session()
         url = f"{self._base_url}{endpoint}"
 
-        # Get Bearer token if needed for /api/* endpoints
+        # Get Bearer token if authentication is requested and credentials are available
         bearer_token = None
-        if use_auth and endpoint.startswith("/api"):
+        if use_auth:
             bearer_token = await self._get_bearer_token()
             if bearer_token:
                 _LOGGER.debug("Using Bearer auth for: %s", endpoint)
@@ -330,42 +330,69 @@ class FileFlowsApi:
     # Connection Test - Uses PUBLIC endpoint (no auth)
     # =========================================================================
     async def test_connection(self) -> bool:
-        """Test connection to FileFlows using public endpoint."""
+        """Test connection to FileFlows.
+
+        If credentials are configured, uses /api/status (requires auth).
+        Otherwise tries /remote/info/status (public).
+        """
         try:
-            # Use the public remote/info/status endpoint - no auth needed
-            result = await self.get_remote_status()
-            # Check if we got valid data (queue should be a number)
-            if result and not isinstance(result.get("queue"), type(None)):
+            # If we have credentials, use authenticated /api/status endpoint
+            if self._username and self._password:
+                _LOGGER.debug("Testing connection with /api/status (authenticated)")
+                result = await self._get(API_STATUS, use_auth=True)
+            else:
+                _LOGGER.debug("Testing connection with /remote/info/status (no auth)")
+                result = await self._get(REMOTE_STATUS, use_auth=False)
+
+            # Validate result
+            if not isinstance(result, dict):
+                _LOGGER.warning("Connection test returned non-dict: %s", type(result))
+                return False
+
+            # Check if we got valid data (queue should be present)
+            if "queue" in result:
+                _LOGGER.debug("Connection test successful, queue=%s", result.get("queue"))
                 return True
-            return result is not None
+
+            _LOGGER.warning("Connection test returned dict without 'queue' key")
+            return False
+
         except FileFlowsApiError as err:
             _LOGGER.error("Connection test failed: %s", err)
             return False
 
     # =========================================================================
-    # Public/Remote Endpoints (NO AUTH REQUIRED)
-    # These are the same endpoints Fenrus uses
+    # Remote Endpoints - Use Bearer auth if credentials are available
     # =========================================================================
     async def get_remote_status(self) -> dict[str, Any]:
-        """Get status from public endpoint (no auth).
-        
+        """Get status from remote endpoint.
+
+        Uses Bearer auth if credentials configured, otherwise no auth.
         Returns: {queue, processing, processed, time, processingFiles[]}
         """
-        result = await self._get(REMOTE_STATUS, use_auth=False)
+        # Use auth if credentials are available
+        use_auth = bool(self._username and self._password)
+        result = await self._get(REMOTE_STATUS, use_auth=use_auth)
         return result if isinstance(result, dict) else {}
 
     async def get_remote_shrinkage(self) -> list[dict[str, Any]]:
-        """Get shrinkage groups from public endpoint (no auth).
-        
+        """Get shrinkage groups from remote endpoint.
+
+        Uses Bearer auth if credentials configured.
         Returns: [{Library, OriginalSize, FinalSize}, ...]
         """
-        result = await self._get(REMOTE_SHRINKAGE, use_auth=False)
+        use_auth = bool(self._username and self._password)
+        result = await self._get(REMOTE_SHRINKAGE, use_auth=use_auth)
         return result if isinstance(result, list) else []
 
     async def get_remote_update_available(self) -> bool:
-        """Check if update is available from public endpoint (no auth)."""
+        """Check if update is available from remote endpoint.
+
+        Uses Bearer auth if credentials configured.
+        """
         try:
-            result = await self._get(REMOTE_UPDATE_AVAILABLE, use_auth=False)
+            use_auth = bool(self._username and self._password)
+            result = await self._get(REMOTE_UPDATE_AVAILABLE, use_auth=use_auth)
             if isinstance(result, dict):
                 return result.get("UpdateAvailable", False)
             return False
@@ -373,9 +400,13 @@ class FileFlowsApi:
             return False
 
     async def get_remote_version(self) -> str:
-        """Get version from public endpoint (no auth)."""
+        """Get version from remote endpoint.
+
+        Uses Bearer auth if credentials configured.
+        """
         try:
-            result = await self._get(REMOTE_VERSION, use_auth=False)
+            use_auth = bool(self._username and self._password)
+            result = await self._get(REMOTE_VERSION, use_auth=use_auth)
             if isinstance(result, str):
                 return result
             if isinstance(result, dict):

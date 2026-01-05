@@ -31,70 +31,20 @@ async def test_integration_setup():
         base_url = f"http://{HOST}:{PORT}"
 
         # =====================================================================
-        # STEP 1: Test basic connection with public endpoint
+        # STEP 1: Get Bearer token FIRST (required for ALL endpoints!)
         # =====================================================================
-        print("[STEP 1] Testing basic connection (no auth)...")
-        try:
-            async with session.get(
-                f"{base_url}/remote/info/status",
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                print(f"  Status: {response.status}")
-                if response.status == 200:
-                    data = await response.json()
-                    print(f"  ✅ Connection successful")
-                    print(f"  Queue: {data.get('queue', 'N/A')}")
-                    print(f"  Processing: {data.get('processing', 'N/A')}")
-                else:
-                    print(f"  ❌ Connection failed with status {response.status}")
-                    return
-        except Exception as err:
-            print(f"  ❌ Connection error: {err}")
-            return
+        print("[STEP 1] Getting Bearer token...")
 
-        print()
-
-        # =====================================================================
-        # STEP 2: Get version info
-        # =====================================================================
-        print("[STEP 2] Getting version...")
-        try:
-            async with session.get(
-                f"{base_url}/remote/info/version",
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                if response.status == 200:
-                    version = await response.text()
-                    version = version.strip().strip('"')
-                    print(f"  ✅ Version: {version}")
-                else:
-                    print(f"  ⚠️  Version request failed: {response.status}")
-                    version = "Unknown"
-        except Exception as err:
-            print(f"  ⚠️  Version error: {err}")
-            version = "Unknown"
-
-        print()
-
-        # =====================================================================
-        # STEP 3: Test Bearer token authentication
-        # =====================================================================
-        print("[STEP 3] Testing Bearer token authentication...")
-
-        # Clean username/password (like we do in config_flow.py)
+        # Clean username/password
         username_clean = USERNAME.strip() or None
         password_clean = PASSWORD.strip() or None
 
         if not username_clean or not password_clean:
-            print("  ⚠️  No credentials provided - skipping auth test")
-            print()
-            print("=" * 70)
-            print("RESULT: Basic connection works, but no authentication tested")
-            print("=" * 70)
+            print("  ❌ No credentials provided!")
             return
 
-        # Step 3a: Get Bearer token
-        print(f"  [3a] Requesting Bearer token for user: {username_clean}")
+        # Get Bearer token
+        print(f"  Requesting Bearer token for user: {username_clean}")
         try:
             async with session.post(
                 f"{base_url}/authorize",
@@ -129,8 +79,35 @@ async def test_integration_setup():
 
         print()
 
-        # Step 3b: Test token with authenticated endpoint
-        print(f"  [3b] Testing Bearer token with /api/system/info...")
+        # =====================================================================
+        # STEP 2: Test /api/status endpoint (authenticated)
+        # =====================================================================
+        print("[STEP 2] Testing /api/status with Bearer token...")
+        try:
+            async with session.get(
+                f"{base_url}/api/status",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                print(f"  Status: {response.status}")
+                if response.status == 200:
+                    data = await response.json()
+                    print(f"  ✅ Authenticated API access successful")
+                    if data:
+                        print(f"  Data keys: {list(data.keys())[:10]}")
+                else:
+                    print(f"  ❌ API call failed with status {response.status}")
+                    return
+        except Exception as err:
+            print(f"  ❌ API error: {err}")
+            return
+
+        print()
+
+        # =====================================================================
+        # STEP 3: Try /remote/info/status (may require auth on your server)
+        # =====================================================================
+        print("[STEP 3] Testing /remote/info/status...")
         try:
             async with session.get(
                 f"{base_url}/api/system/info",

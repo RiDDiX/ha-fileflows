@@ -69,16 +69,19 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         session=session,
     )
 
-    # Test connection with public remote/info/status endpoint (no auth required)
+    # Test connection - if credentials provided, this will use Bearer auth
     try:
-        _LOGGER.debug("Testing basic connection...")
+        _LOGGER.debug("Testing connection...")
         if not await api.test_connection():
-            _LOGGER.error("Basic connection test failed")
+            _LOGGER.error("Connection test failed")
             raise CannotConnect("Connection test failed")
-        _LOGGER.debug("Basic connection successful")
+        _LOGGER.debug("Connection successful")
     except FileFlowsConnectionError as err:
         _LOGGER.error("Connection error: %s", err)
         raise CannotConnect from err
+    except FileFlowsAuthError as err:
+        _LOGGER.error("Authentication error during connection: %s", err)
+        raise InvalidAuth from err
     except Exception as err:
         _LOGGER.error("Unexpected error during connection test: %s", err)
         raise CannotConnect(str(err)) from err
