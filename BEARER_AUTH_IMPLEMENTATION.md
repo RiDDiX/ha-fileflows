@@ -58,11 +58,11 @@ async def get_nvidia_smi() -> list:
 #### Neue Konfigurations-Felder:
 ```yaml
 # Home Assistant Integration Config
-host: 192.168.178.8
-port: 8585
+host: IP
+port: PORT
 ssl: false
 verify_ssl: true
-username: riddix         # NEU! Optional
+username: username         # NEU! Optional
 password: your_password  # NEU! Optional
 ```
 
@@ -141,8 +141,8 @@ data = {
 1. **Initial Login**:
    ```
    POST /authorize
-   Body: {"username": "riddix", "password": "p8Gq9stnyx4cgCK"}
-   Response: "eyJhbGciOiJIUzI1NiIs..." (JWT Token)
+   Body: {"username": "user_name", "password": "user_password"}
+   Response: "XYZ..." (JWT Token)
    ```
 
 2. **Token wird gecached**:
@@ -155,7 +155,7 @@ data = {
    ```
    GET /api/status
    Headers: {
-       "Authorization": "Bearer eyJhbGciOiJIUzI1NiIs..."
+       "Authorization": "Bearer XYZ..."
    }
    ```
 
@@ -183,12 +183,12 @@ except FileFlowsAuthError:
 
 ```yaml
 # In Home Assistant UI:
-Host: 192.168.178.8
-Port: 8585
+Host: IP
+Port: PORT
 SSL: false
 Verify SSL: true
-Username: riddix              # ← Neu!
-Password: p8Gq9stnyx4cgCK     # ← Neu!
+Username: user              # ← Neu!
+Password: password     # ← Neu!
 ```
 
 **Ergebnis:**
@@ -202,8 +202,8 @@ Password: p8Gq9stnyx4cgCK     # ← Neu!
 
 ```yaml
 # In Home Assistant UI:
-Host: 192.168.178.8
-Port: 8585
+Host: IP
+Port: PORT
 SSL: false
 Verify SSL: true
 # Username und Password LEER lassen
