@@ -51,6 +51,8 @@ def get_schema(
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
+    _LOGGER.debug("Validating FileFlows connection to %s:%s", data[CONF_HOST], data.get(CONF_PORT, DEFAULT_PORT))
+
     session = async_get_clientsession(hass, verify_ssl=data.get(CONF_VERIFY_SSL, True))
 
     api = FileFlowsApi(
@@ -63,35 +65,52 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         session=session,
     )
 
+    # Test connection with public remote/info/status endpoint (no auth required)
     try:
-        # Test connection with public remote/info/status endpoint (no auth required)
+        _LOGGER.debug("Testing basic connection...")
         if not await api.test_connection():
+            _LOGGER.error("Basic connection test failed")
             raise CannotConnect("Connection test failed")
-
-        # Get version info
-        version = await api.get_version()
-
-        # If username/password provided, test Bearer token authentication
-        if data.get(CONF_USERNAME) and data.get(CONF_PASSWORD):
-            _LOGGER.info("Testing Bearer token authentication...")
-            try:
-                # Try to get authenticated data to verify credentials work
-                token = await api._get_bearer_token()
-                if not token:
-                    raise FileFlowsAuthError("Failed to obtain Bearer token")
-                _LOGGER.info("Bearer token authentication successful")
-            except FileFlowsAuthError as err:
-                _LOGGER.error("Bearer authentication failed: %s", err)
-                raise InvalidAuth from err
-        else:
-            _LOGGER.info("No credentials provided - will use public endpoints only")
-
-    except FileFlowsAuthError as err:
-        raise InvalidAuth from err
+        _LOGGER.debug("Basic connection successful")
     except FileFlowsConnectionError as err:
+        _LOGGER.error("Connection error: %s", err)
         raise CannotConnect from err
-    except FileFlowsApiError as err:
-        raise CannotConnect from err
+    except Exception as err:
+        _LOGGER.error("Unexpected error during connection test: %s", err)
+        raise CannotConnect(str(err)) from err
+
+    # Get version info
+    try:
+        _LOGGER.debug("Getting version info...")
+        version = await api.get_version()
+        _LOGGER.debug("Version: %s", version)
+    except Exception as err:
+        _LOGGER.error("Failed to get version: %s", err)
+        version = "Unknown"
+
+    # If username/password provided, test Bearer token authentication
+    if data.get(CONF_USERNAME) and data.get(CONF_PASSWORD):
+        _LOGGER.info("Credentials provided, testing Bearer token authentication...")
+        _LOGGER.debug("Username: %s", data.get(CONF_USERNAME))
+
+        try:
+            # Try to get Bearer token to verify credentials work
+            token = await api._get_bearer_token()
+
+            if not token:
+                _LOGGER.error("Failed to obtain Bearer token - no token returned")
+                raise InvalidAuth("Failed to obtain Bearer token")
+
+            _LOGGER.info("Bearer token authentication successful (token length: %d)", len(token))
+
+        except FileFlowsAuthError as err:
+            _LOGGER.error("Bearer authentication failed: %s", err)
+            raise InvalidAuth from err
+        except Exception as err:
+            _LOGGER.error("Unexpected error during authentication: %s", err)
+            raise InvalidAuth(str(err)) from err
+    else:
+        _LOGGER.info("No credentials provided - will use public endpoints only")
 
     return {"title": f"FileFlows ({data[CONF_HOST]})", "version": version}
 
