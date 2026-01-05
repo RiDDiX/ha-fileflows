@@ -1,0 +1,230 @@
+{
+  "working": [
+    {
+      "endpoint": "remote/info/status",
+      "method": "GET",
+      "status": 200,
+      "description": "Public status endpoint",
+      "url": "http://192.168.178.8:8585/remote/info/status",
+      "response_type": "dict",
+      "keys": [
+        "queue",
+        "processing",
+        "processed",
+        "time",
+        "processingFiles"
+      ]
+    },
+    {
+      "endpoint": "remote/info/shrinkage-groups",
+      "method": "GET",
+      "status": 200,
+      "description": "Public shrinkage data",
+      "url": "http://192.168.178.8:8585/remote/info/shrinkage-groups",
+      "response_type": "list",
+      "count": 2
+    },
+    {
+      "endpoint": "remote/info/update-available",
+      "method": "GET",
+      "status": 200,
+      "description": "Public update check",
+      "url": "http://192.168.178.8:8585/remote/info/update-available",
+      "response_type": "dict",
+      "keys": [
+        "UpdateAvailable"
+      ]
+    },
+    {
+      "endpoint": "remote/info/version",
+      "method": "GET",
+      "status": 200,
+      "description": "Public version",
+      "url": "http://192.168.178.8:8585/remote/info/version",
+      "response_type": "text",
+      "preview": "<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"minima"
+    },
+    {
+      "endpoint": "api/system/version",
+      "method": "GET",
+      "status": 200,
+      "description": "System version",
+      "url": "http://192.168.178.8:8585/api/system/version",
+      "response_type": "text",
+      "preview": "25.12.9.6135"
+    }
+  ],
+  "not_found": [
+    {
+      "endpoint": "api/system/info",
+      "method": "GET",
+      "status": 404,
+      "description": "System info (SUSPECTED WRONG)",
+      "url": "http://192.168.178.8:8585/api/system/info"
+    },
+    {
+      "endpoint": "api/settings/fileflows-status",
+      "method": "GET",
+      "status": 404,
+      "description": "FileFlows status (SUSPECTED WRONG)",
+      "url": "http://192.168.178.8:8585/api/settings/fileflows-status"
+    },
+    {
+      "endpoint": "api/worker",
+      "method": "GET",
+      "status": 404,
+      "description": "List workers (SUSPECTED WRONG)",
+      "url": "http://192.168.178.8:8585/api/worker"
+    }
+  ],
+  "auth_error": [
+    {
+      "endpoint": "api/settings",
+      "method": "GET",
+      "status": 401,
+      "description": "System settings",
+      "url": "http://192.168.178.8:8585/api/settings"
+    },
+    {
+      "endpoint": "api/settings/ui-settings",
+      "method": "GET",
+      "status": 401,
+      "description": "UI settings",
+      "url": "http://192.168.178.8:8585/api/settings/ui-settings"
+    },
+    {
+      "endpoint": "api/node",
+      "method": "GET",
+      "status": 401,
+      "description": "List nodes",
+      "url": "http://192.168.178.8:8585/api/node"
+    },
+    {
+      "endpoint": "api/library",
+      "method": "GET",
+      "status": 401,
+      "description": "List libraries",
+      "url": "http://192.168.178.8:8585/api/library"
+    },
+    {
+      "endpoint": "api/library-file/status",
+      "method": "GET",
+      "status": 401,
+      "description": "Library file status",
+      "url": "http://192.168.178.8:8585/api/library-file/status"
+    },
+    {
+      "endpoint": "api/library-file/upcoming",
+      "method": "GET",
+      "status": 401,
+      "description": "Upcoming files (SUSPECTED WRONG)",
+      "url": "http://192.168.178.8:8585/api/library-file/upcoming"
+    },
+    {
+      "endpoint": "api/library-file/recently-finished",
+      "method": "GET",
+      "status": 401,
+      "description": "Recently finished (SUSPECTED WRONG)",
+      "url": "http://192.168.178.8:8585/api/library-file/recently-finished"
+    },
+    {
+      "endpoint": "api/flow",
+      "method": "GET",
+      "status": 401,
+      "description": "List flows",
+      "url": "http://192.168.178.8:8585/api/flow"
+    },
+    {
+      "endpoint": "api/task",
+      "method": "GET",
+      "status": 401,
+      "description": "List tasks",
+      "url": "http://192.168.178.8:8585/api/task"
+    },
+    {
+      "endpoint": "api/plugin",
+      "method": "GET",
+      "status": 401,
+      "description": "List plugins",
+      "url": "http://192.168.178.8:8585/api/plugin"
+    },
+    {
+      "endpoint": "api/nvidia/smi",
+      "method": "GET",
+      "status": 401,
+      "description": "NVIDIA GPU status",
+      "url": "http://192.168.178.8:8585/api/nvidia/smi"
+    },
+    {
+      "endpoint": "api/status",
+      "method": "GET",
+      "status": 401,
+      "description": "Main status endpoint (CRITICAL)",
+      "url": "http://192.168.178.8:8585/api/status"
+    },
+    {
+      "endpoint": "api/status/update-available",
+      "method": "GET",
+      "status": 401,
+      "description": "Update available check",
+      "url": "http://192.168.178.8:8585/api/status/update-available"
+    },
+    {
+      "endpoint": "api/node/overview",
+      "method": "GET",
+      "status": 401,
+      "description": "Node overview (CRITICAL)",
+      "url": "http://192.168.178.8:8585/api/node/overview"
+    },
+    {
+      "endpoint": "api/statistics/storage-saved",
+      "method": "GET",
+      "status": 401,
+      "description": "Storage statistics",
+      "url": "http://192.168.178.8:8585/api/statistics/storage-saved"
+    },
+    {
+      "endpoint": "api/statistics/storage-saved-raw",
+      "method": "GET",
+      "status": 401,
+      "description": "Raw storage data",
+      "url": "http://192.168.178.8:8585/api/statistics/storage-saved-raw"
+    },
+    {
+      "endpoint": "api/library-file",
+      "method": "GET",
+      "status": 401,
+      "description": "Library files list",
+      "url": "http://192.168.178.8:8585/api/library-file"
+    },
+    {
+      "endpoint": "api/library-file/list-all",
+      "method": "GET",
+      "status": 401,
+      "description": "All library files",
+      "url": "http://192.168.178.8:8585/api/library-file/list-all"
+    },
+    {
+      "endpoint": "api/node/list",
+      "method": "GET",
+      "status": 401,
+      "description": "Node list alternative",
+      "url": "http://192.168.178.8:8585/api/node/list"
+    },
+    {
+      "endpoint": "api/flow/list-all",
+      "method": "GET",
+      "status": 401,
+      "description": "Flow list alternative",
+      "url": "http://192.168.178.8:8585/api/flow/list-all"
+    },
+    {
+      "endpoint": "api/library-file/find-all-libraries",
+      "method": "GET",
+      "status": 401,
+      "description": "Find all libraries",
+      "url": "http://192.168.178.8:8585/api/library-file/find-all-libraries"
+    }
+  ],
+  "other_error": []
+}

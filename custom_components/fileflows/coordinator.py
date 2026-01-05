@@ -55,13 +55,14 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def is_paused(self) -> bool:
-        """Check if system is paused."""
-        # Check fileflows_status first (from authenticated endpoint)
-        status = self.fileflows_status
-        if status:
-            return status.get("IsPaused", False)
-        # Fall back to system_info
-        return self.system_info.get("IsPaused", False)
+        """Check if system is paused.
+
+        Note: This information is not available in /remote/info/* endpoints.
+        Returns False by default. Use the System Active switch to control pause state.
+        """
+        # Pause status not available in public endpoints
+        # This will be managed by the switch entity
+        return False
 
     @property
     def queue_from_remote(self) -> int:
@@ -92,17 +93,8 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self.remote_status.get("processingFiles", [])
 
     # =========================================================================
-    # System Info Properties
+    # System Info Properties - Now derived from remote_status
     # =========================================================================
-    @property
-    def system_info(self) -> dict[str, Any]:
-        """Get system info from /api/system/info."""
-        return self.data.get("system_info", {}) if self.data else {}
-
-    @property
-    def fileflows_status(self) -> dict[str, Any]:
-        """Get fileflows status from /api/settings/fileflows-status."""
-        return self.data.get("fileflows_status", {}) if self.data else {}
 
     @property
     def version(self) -> str:
@@ -116,147 +108,130 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @property
     def cpu_usage(self) -> float:
-        """Get CPU usage percentage."""
-        return self.system_info.get("CpuUsage", 0.0)
+        """Get CPU usage percentage.
+
+        Note: Not available in /remote/info/* endpoints.
+        """
+        return 0.0
 
     @property
     def memory_usage(self) -> float:
-        """Get memory usage percentage."""
-        return self.system_info.get("MemoryUsage", 0.0)
+        """Get memory usage percentage.
+
+        Note: Not available in /remote/info/* endpoints.
+        """
+        return 0.0
 
     @property
     def memory_used_mb(self) -> float:
-        """Get memory used in MB."""
-        return self.system_info.get("MemoryUsed", 0) / (1024 * 1024)
+        """Get memory used in MB.
+
+        Note: Not available in /remote/info/* endpoints.
+        """
+        return 0.0
 
     @property
     def memory_total_mb(self) -> float:
-        """Get total memory in MB."""
-        return self.system_info.get("MemoryTotal", 0) / (1024 * 1024)
+        """Get total memory in MB.
+
+        Note: Not available in /remote/info/* endpoints.
+        """
+        return 0.0
 
     @property
     def temp_directory_size_gb(self) -> float:
-        """Get temp directory size in GB."""
-        size = self.system_info.get("TempDirectorySize", 0)
-        return round(size / (1024 ** 3), 2)
+        """Get temp directory size in GB.
+
+        Note: Not available in /remote/info/* endpoints.
+        """
+        return 0.0
 
     @property
     def log_directory_size_gb(self) -> float:
-        """Get log directory size in GB."""
-        size = self.system_info.get("LogDirectorySize", 0)
-        return round(size / (1024 ** 3), 2)
+        """Get log directory size in GB.
+
+        Note: Not available in /remote/info/* endpoints.
+        """
+        return 0.0
 
     # =========================================================================
-    # Node Properties
+    # Node, Library, Flow Properties - Not available in /remote/info/* endpoints
+    # These return 0 or empty lists since the data is not accessible
     # =========================================================================
-    @property
-    def nodes(self) -> list[dict[str, Any]]:
-        """Get all processing nodes."""
-        return self.data.get("nodes", []) if self.data else []
-
     @property
     def nodes_count(self) -> int:
-        """Get number of nodes."""
-        return len(self.nodes)
+        """Get number of nodes. Not available in public endpoints."""
+        return 0
 
     @property
     def enabled_nodes_count(self) -> int:
-        """Get number of enabled nodes."""
-        return len([n for n in self.nodes if n.get("Enabled", False)])
+        """Get number of enabled nodes. Not available in public endpoints."""
+        return 0
 
     @property
     def total_runners(self) -> int:
-        """Get total number of runners from all enabled nodes."""
-        return sum(n.get("FlowRunners", 0) for n in self.nodes if n.get("Enabled", False))
-
-    # =========================================================================
-    # Library Properties
-    # =========================================================================
-    @property
-    def libraries(self) -> list[dict[str, Any]]:
-        """Get all libraries."""
-        return self.data.get("libraries", []) if self.data else []
+        """Get total number of runners. Not available in public endpoints."""
+        return 0
 
     @property
     def libraries_count(self) -> int:
-        """Get number of libraries."""
-        return len(self.libraries)
+        """Get number of libraries. Not available in public endpoints."""
+        return 0
 
     @property
     def enabled_libraries_count(self) -> int:
-        """Get number of enabled libraries."""
-        return len([lib for lib in self.libraries if lib.get("Enabled", False)])
-
-    # =========================================================================
-    # Flow Properties
-    # =========================================================================
-    @property
-    def flows(self) -> list[dict[str, Any]]:
-        """Get all flows."""
-        return self.data.get("flows", []) if self.data else []
+        """Get number of enabled libraries. Not available in public endpoints."""
+        return 0
 
     @property
     def flows_count(self) -> int:
-        """Get number of flows."""
-        return len(self.flows)
+        """Get number of flows. Not available in public endpoints."""
+        return 0
 
     @property
     def enabled_flows_count(self) -> int:
-        """Get number of enabled flows."""
-        return len([f for f in self.flows if f.get("Enabled", False)])
+        """Get number of enabled flows. Not available in public endpoints."""
+        return 0
 
     # =========================================================================
-    # Worker Properties (combines remote_status + /api/worker)
+    # Worker Properties - Use remote_status processing_files
     # =========================================================================
-    @property
-    def workers(self) -> list[dict[str, Any]]:
-        """Get all running workers/executors from authenticated endpoint."""
-        return self.data.get("workers", []) if self.data else []
-
     @property
     def active_workers(self) -> int:
-        """Get number of active workers."""
-        # Use processing_files from public endpoint as primary source
+        """Get number of active workers from processing files."""
+        # Use processing_files from public remote_status endpoint
         pf = self.processing_files
         if pf:
             return len(pf)
-        # Fall back to workers from authenticated endpoint
-        return len(self.workers)
+        # Alternative: use processing count from remote_status
+        return self.processing_from_remote
 
     @property
     def is_processing(self) -> bool:
         """Check if any files are being processed."""
-        # Use remote_status first (public endpoint)
+        # Use remote_status (public endpoint)
         if self.processing_files:
             return True
         if self.processing_from_remote > 0:
             return True
-        # Fall back to workers
-        return len(self.workers) > 0
+        return False
 
     @property
     def current_file(self) -> str | None:
         """Get current processing file name."""
-        # Use processingFiles from remote_status first
+        # Use processingFiles from remote_status
         pf = self.processing_files
         if pf:
             return pf[0].get("name", pf[0].get("relativePath", "Unknown"))
-        # Fall back to workers
-        if self.workers:
-            worker = self.workers[0]
-            return worker.get("CurrentFile", worker.get("LibraryFile", {}).get("Name", "Unknown"))
         return None
 
     @property
     def current_file_progress(self) -> float:
         """Get current file progress percentage."""
-        # Use processingFiles from remote_status first
+        # Use processingFiles from remote_status
         pf = self.processing_files
         if pf:
             return pf[0].get("stepPercent", 0.0)
-        # Fall back to workers
-        if self.workers:
-            return self.workers[0].get("CurrentPartPercent", 0.0)
         return 0.0
 
     @property
@@ -265,42 +240,25 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pf = self.processing_files
         if pf:
             return pf[0].get("step", None)
-        if self.workers:
-            return self.workers[0].get("CurrentPartName", None)
         return None
 
     # =========================================================================
-    # Library File Status Properties (combines remote + authenticated data)
+    # Library File Status Properties - From remote_status only
     # =========================================================================
     @property
-    def library_file_status(self) -> dict[str, Any]:
-        """Get library file status overview from authenticated endpoint."""
-        return self.data.get("library_file_status", {}) if self.data else {}
-
-    @property
     def files_unprocessed(self) -> int:
-        """Get unprocessed files count."""
-        # Use queue from remote_status as primary (public endpoint)
-        queue = self.queue_from_remote
-        if queue > 0:
-            return queue
-        # Fall back to library_file_status (authenticated)
-        return self.library_file_status.get("Unprocessed", 0)
+        """Get unprocessed files count from remote_status."""
+        return self.queue_from_remote
 
     @property
     def files_processed(self) -> int:
-        """Get processed files count."""
-        # Use processed from remote_status as primary
-        processed = self.processed_from_remote
-        if processed > 0:
-            return processed
-        # Fall back to library_file_status
-        return self.library_file_status.get("Processed", 0)
+        """Get processed files count from remote_status."""
+        return self.processed_from_remote
 
     @property
     def files_processing(self) -> int:
-        """Get processing files count."""
-        # Use processing from remote_status as primary
+        """Get processing files count from remote_status."""
+        # Use processing count from remote_status
         processing = self.processing_from_remote
         if processing > 0:
             return processing
@@ -308,54 +266,32 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pf = self.processing_files
         if pf:
             return len(pf)
-        # Fall back to library_file_status
-        return self.library_file_status.get("Processing", 0)
+        return 0
 
     @property
     def files_failed(self) -> int:
-        """Get failed files count."""
-        return self.library_file_status.get("Failed", 0)
+        """Get failed files count. Not available in public endpoints."""
+        return 0
 
     @property
     def files_on_hold(self) -> int:
-        """Get on hold files count."""
-        return self.library_file_status.get("OnHold", 0)
+        """Get on hold files count. Not available in public endpoints."""
+        return 0
 
     @property
     def files_out_of_schedule(self) -> int:
-        """Get out of schedule files count."""
-        return self.library_file_status.get("OutOfSchedule", 0)
+        """Get out of schedule files count. Not available in public endpoints."""
+        return 0
 
     @property
     def files_disabled(self) -> int:
-        """Get disabled files count."""
-        return self.library_file_status.get("Disabled", 0)
+        """Get disabled files count. Not available in public endpoints."""
+        return 0
 
     @property
     def queue_size(self) -> int:
-        """Get total queue size.
-        
-        Uses queue from public remote_status endpoint as primary source.
-        """
-        # Remote status queue is the authoritative source
-        queue = self.queue_from_remote
-        if queue > 0:
-            return queue
-        # Fall back to unprocessed + processing from library_file_status
-        return self.files_unprocessed + self.files_processing
-
-    # =========================================================================
-    # Upcoming & Recently Finished
-    # =========================================================================
-    @property
-    def upcoming_files(self) -> list[dict[str, Any]]:
-        """Get upcoming files to process."""
-        return self.data.get("upcoming_files", []) if self.data else []
-
-    @property
-    def recently_finished(self) -> list[dict[str, Any]]:
-        """Get recently finished files."""
-        return self.data.get("recently_finished", []) if self.data else []
+        """Get total queue size from remote_status."""
+        return self.queue_from_remote
 
     # =========================================================================
     # Shrinkage Properties
@@ -395,70 +331,49 @@ class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return 0.0
 
     # =========================================================================
-    # Task Properties
+    # Task, Plugin, and NVIDIA Properties - Not available in /remote/info/*
     # =========================================================================
-    @property
-    def tasks(self) -> list[dict[str, Any]]:
-        """Get all scheduled tasks."""
-        return self.data.get("tasks", []) if self.data else []
-
     @property
     def tasks_count(self) -> int:
-        """Get number of scheduled tasks."""
-        return len(self.tasks)
-
-    # =========================================================================
-    # Plugin Properties
-    # =========================================================================
-    @property
-    def plugins(self) -> list[dict[str, Any]]:
-        """Get all plugins."""
-        return self.data.get("plugins", []) if self.data else []
+        """Get number of scheduled tasks. Not available in public endpoints."""
+        return 0
 
     @property
     def plugins_count(self) -> int:
-        """Get number of plugins."""
-        return len(self.plugins)
+        """Get number of plugins. Not available in public endpoints."""
+        return 0
 
     @property
     def enabled_plugins_count(self) -> int:
-        """Get number of enabled plugins."""
-        return len([p for p in self.plugins if p.get("Enabled", False)])
-
-    # =========================================================================
-    # NVIDIA Properties
-    # =========================================================================
-    @property
-    def nvidia_info(self) -> dict[str, Any]:
-        """Get NVIDIA SMI info."""
-        return self.data.get("nvidia", {}) if self.data else {}
+        """Get number of enabled plugins. Not available in public endpoints."""
+        return 0
 
     @property
     def has_nvidia(self) -> bool:
-        """Check if NVIDIA GPU is available."""
-        return bool(self.nvidia_info)
+        """Check if NVIDIA GPU is available. Not available in public endpoints."""
+        return False
 
     @property
     def nvidia_gpu_usage(self) -> float:
-        """Get NVIDIA GPU usage percentage."""
-        return self.nvidia_info.get("GpuUsage", 0.0)
+        """Get NVIDIA GPU usage percentage. Not available in public endpoints."""
+        return 0.0
 
     @property
     def nvidia_memory_usage(self) -> float:
-        """Get NVIDIA memory usage percentage."""
-        return self.nvidia_info.get("MemoryUsage", 0.0)
+        """Get NVIDIA memory usage percentage. Not available in public endpoints."""
+        return 0.0
 
     @property
     def nvidia_encoder_usage(self) -> float:
-        """Get NVIDIA encoder usage percentage."""
-        return self.nvidia_info.get("EncoderUsage", 0.0)
+        """Get NVIDIA encoder usage percentage. Not available in public endpoints."""
+        return 0.0
 
     @property
     def nvidia_decoder_usage(self) -> float:
-        """Get NVIDIA decoder usage percentage."""
-        return self.nvidia_info.get("DecoderUsage", 0.0)
+        """Get NVIDIA decoder usage percentage. Not available in public endpoints."""
+        return 0.0
 
     @property
     def nvidia_temperature(self) -> float:
-        """Get NVIDIA GPU temperature."""
-        return self.nvidia_info.get("Temperature", 0.0)
+        """Get NVIDIA GPU temperature. Not available in public endpoints."""
+        return 0.0
