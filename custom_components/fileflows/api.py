@@ -762,22 +762,24 @@ class FileFlowsApi:
             if self._username and self._password:
                 _LOGGER.debug("Fetching storage savings from /api/statistics/storage-saved")
                 data["storage_saved_stats"] = await self.get_storage_saved()
-                # Also try old shrinkage endpoint for backward compatibility
+                # Don't fetch shrinkage_groups if we have the new endpoint data
+                # Fallback is handled in coordinator properties
+            else:
+                # No auth - try public remote endpoint
+                _LOGGER.debug("Fetching shrinkage from /remote/info/shrinkage-groups (no auth)")
                 try:
                     data["shrinkage_groups"] = await self.get_remote_shrinkage()
                 except FileFlowsApiError:
-                    pass
-            else:
-                _LOGGER.debug("Fetching shrinkage from /remote/info/shrinkage-groups")
-                data["shrinkage_groups"] = await self.get_remote_shrinkage()
+                    pass  # Remote endpoints may not be available
         except FileFlowsApiError as err:
             _LOGGER.debug("Could not get storage data: %s", err)
 
-        # Update available
-        try:
-            data["update_available"] = await self.get_remote_update_available()
-        except FileFlowsApiError as err:
-            _LOGGER.debug("Could not get update info: %s", err)
+        # Update available - only try if no auth (remote endpoint may not exist with auth)
+        if not (self._username and self._password):
+            try:
+                data["update_available"] = await self.get_remote_update_available()
+            except FileFlowsApiError as err:
+                _LOGGER.debug("Could not get update info: %s", err)
 
         # Version
         try:

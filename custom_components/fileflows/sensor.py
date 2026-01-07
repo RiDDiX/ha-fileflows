@@ -200,56 +200,6 @@ SENSOR_DESCRIPTIONS: tuple[FileFlowsSensorEntityDescription, ...] = (
         value_fn=lambda c: c.storage_saved_percent,
     ),
     # -------------------------------------------------------------------------
-    # System Resources
-    # -------------------------------------------------------------------------
-    FileFlowsSensorEntityDescription(
-        key="cpu_usage",
-        translation_key="cpu_usage",
-        name="CPU Usage",
-        icon="mdi:cpu-64-bit",
-        device_class=SensorDeviceClass.POWER_FACTOR,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=PERCENTAGE,
-        suggested_display_precision=1,
-        value_fn=lambda c: c.cpu_usage,
-    ),
-    FileFlowsSensorEntityDescription(
-        key="memory_usage",
-        translation_key="memory_usage",
-        name="Memory Usage",
-        icon="mdi:memory",
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=PERCENTAGE,
-        suggested_display_precision=1,
-        value_fn=lambda c: c.memory_usage,
-        attr_fn=lambda c: {
-            "used_mb": round(c.memory_used_mb, 0),
-            "total_mb": round(c.memory_total_mb, 0),
-        },
-    ),
-    FileFlowsSensorEntityDescription(
-        key="temp_directory_size",
-        translation_key="temp_directory_size",
-        name="Temp Directory Size",
-        icon="mdi:folder-clock",
-        device_class=SensorDeviceClass.DATA_SIZE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
-        suggested_display_precision=2,
-        value_fn=lambda c: c.temp_directory_size_gb,
-    ),
-    FileFlowsSensorEntityDescription(
-        key="log_directory_size",
-        translation_key="log_directory_size",
-        name="Log Directory Size",
-        icon="mdi:folder-text",
-        device_class=SensorDeviceClass.DATA_SIZE,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfInformation.GIGABYTES,
-        suggested_display_precision=2,
-        value_fn=lambda c: c.log_directory_size_gb,
-    ),
-    # -------------------------------------------------------------------------
     # Counts
     # -------------------------------------------------------------------------
     FileFlowsSensorEntityDescription(
