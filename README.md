@@ -2,202 +2,330 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/v/release/RiDDiX/fileflows-ha)](https://github.com/RiDDiX/fileflows-ha/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A comprehensive Home Assistant integration for [FileFlows](https://fileflows.com/) - the automated file processing application.
+A comprehensive Home Assistant integration for [FileFlows](https://fileflows.com/) - the powerful automated file processing application for media libraries.
 
-## Features
+## ✨ Features
 
-### Sensors
-- **Queue Size** - Total files in queue (unprocessed + processing)
+### 📊 Comprehensive Monitoring
+Monitor your FileFlows server with **24 sensors** covering queue status, processing, storage savings, and system resources:
+
+#### Queue & Processing
+- **Queue Size** - Total files in queue
 - **Unprocessed Files** - Files waiting to be processed
-- **Processing Files** - Files currently being processed
-- **Processed Files** - Successfully processed files count
+- **Processing Files** - Currently processing files with detailed progress
+- **Processed Files** - Total successfully processed
 - **Failed Files** - Failed file count
-- **Files On Hold** - Files on hold count
+- **Files On Hold** - Files on hold
 - **Files Out of Schedule** - Files outside processing schedule
-- **Current File** - Currently processing file name
+- **Current File** - Active file with progress and step information
 - **Active Workers** - Number of active processing workers
-- **Storage Saved** - Total storage saved (GB)
-- **Storage Saved Percentage** - Percentage of storage saved
-- **CPU Usage** - FileFlows server CPU usage
-- **Memory Usage** - FileFlows server memory usage
-- **Temp Directory Size** - Size of temp directory
-- **Log Directory Size** - Size of log directory
-- **Processing Nodes** - Number of processing nodes
-- **Libraries** - Number of libraries
-- **Flows** - Number of flows
-- **Plugins** - Number of plugins
-- **Scheduled Tasks** - Number of scheduled tasks
-- **Version** - FileFlows version
-- **Upcoming Files** - Next files to process
+- **Processing Time** - Current processing duration
+
+#### Storage Savings ⭐ NEW in v2.1.0
+- **Storage Saved** - Total storage saved in GB with per-library breakdown
+  - Items count per library
+  - Savings per library
+  - Final size per library
+- **Storage Saved Percentage** - Overall compression ratio
+
+#### System Resources
+- **Processing Nodes** - Number and status of processing nodes
+- **Libraries** - Library count with detailed attributes
+- **Flows** - Flow count with enabled/disabled status
+- **Plugins** - Installed plugins count
+- **Scheduled Tasks** - Number of configured tasks
+- **Version** - FileFlows version with update status
+- **Upcoming Files** - Next files queued for processing
 - **Recently Finished** - Recently completed files
 
-### NVIDIA Sensors (if available)
+### 🎮 NVIDIA GPU Monitoring (Optional)
+If your FileFlows server has an NVIDIA GPU, additional sensors are automatically created:
 - GPU Usage
 - Memory Usage
 - Encoder Usage
 - Decoder Usage
-- Temperature
+- GPU Temperature
 
-### Binary Sensors
-- **System Paused** - Whether the system is paused
-- **Processing Active** - Whether files are being processed
-- **Has Failed Files** - Whether there are failed files
-- **Has Files On Hold** - Whether there are files on hold
-- **Queue Not Empty** - Whether the queue has files
-- **Update Available** - Whether a FileFlows update is available
-- **All Nodes Enabled** - Whether all nodes are enabled
-- **NVIDIA Available** - Whether NVIDIA GPU is available
-- **Per-Node Status** - Individual node enabled status
-- **Per-Library Status** - Individual library enabled status
+### 🔘 Binary Sensors
+Real-time status indicators:
+- **System Paused** - System pause state
+- **Processing Active** - Files being processed
+- **Has Failed Files** - Failed files present
+- **Has Files On Hold** - Files on hold present
+- **Queue Not Empty** - Queue has pending files
+- **Update Available** - FileFlows update available
+- **All Nodes Enabled** - All processing nodes active
+- **Per-Node Status** - Individual node states
+- **Per-Library Status** - Individual library states
 
-### Switches
-- **System Active** - Pause/Resume FileFlows processing
-- **Per-Node Switches** - Enable/Disable individual nodes
-- **Per-Library Switches** - Enable/Disable individual libraries
-- **Per-Flow Switches** - Enable/Disable individual flows
+### 🎛️ Control Switches
+Full control over your FileFlows system:
+- **System Active** - Pause/Resume all processing
+- **Node Switches** - Enable/Disable individual processing nodes
+- **Library Switches** - Enable/Disable individual libraries
+- **Flow Switches** - Enable/Disable individual flows
 
-### Buttons
-- **Pause System** - Pause FileFlows
-- **Resume System** - Resume FileFlows
+### 🔲 Action Buttons
+Quick actions:
+- **Pause/Resume System** - Control processing
 - **Restart Server** - Restart FileFlows server
-- **Rescan All Libraries** - Rescan all enabled libraries
-- **Refresh Data** - Manually refresh data
-- **Per-Library Rescan** - Rescan individual libraries
-- **Per-Task Run** - Run scheduled tasks
+- **Rescan Libraries** - Rescan all or individual libraries
+- **Refresh Data** - Manual data refresh
+- **Run Tasks** - Execute scheduled tasks on demand
 
-### Services
-- `fileflows.pause_system` - Pause processing
-- `fileflows.resume_system` - Resume processing
-- `fileflows.restart_system` - Restart server
-- `fileflows.enable_node` / `fileflows.disable_node` - Node control
-- `fileflows.enable_library` / `fileflows.disable_library` - Library control
-- `fileflows.rescan_library` / `fileflows.rescan_all_libraries` - Library rescan
-- `fileflows.enable_flow` / `fileflows.disable_flow` - Flow control
-- `fileflows.reprocess_file` - Reprocess a file
-- `fileflows.force_processing` - Force process out-of-schedule files
-- `fileflows.unhold_files` - Unhold files
-- `fileflows.abort_worker` - Abort a running worker
-- `fileflows.run_task` - Run a scheduled task
+### 🛠️ Services
+Advanced automation via Home Assistant services:
+- `fileflows.pause_system` / `fileflows.resume_system`
+- `fileflows.restart_system`
+- `fileflows.enable_node` / `fileflows.disable_node`
+- `fileflows.enable_library` / `fileflows.disable_library`
+- `fileflows.rescan_library` / `fileflows.rescan_all_libraries`
+- `fileflows.enable_flow` / `fileflows.disable_flow`
+- `fileflows.reprocess_file`
+- `fileflows.force_processing`
+- `fileflows.unhold_files`
+- `fileflows.abort_worker`
+- `fileflows.run_task`
 
-## Installation
+## 📥 Installation
 
 ### HACS (Recommended)
 
 1. Open HACS in Home Assistant
-2. Go to "Integrations"
-3. Click the three dots menu → "Custom repositories"
-4. Add `https://github.com/RiDDiX/fileflows-ha` as an Integration
-5. Search for "FileFlows" and install
-6. Restart Home Assistant
-7. Go to Settings → Devices & Services → Add Integration → FileFlows
+2. Go to **Integrations**
+3. Click the **⋮** menu → **Custom repositories**
+4. Add `https://github.com/RiDDiX/fileflows-ha` as an **Integration**
+5. Search for **"FileFlows"** and click **Install**
+6. **Restart Home Assistant**
+7. Go to **Settings** → **Devices & Services** → **Add Integration** → **FileFlows**
 
 ### Manual Installation
 
-1. Download the latest release from GitHub
+1. Download the [latest release](https://github.com/RiDDiX/fileflows-ha/releases)
 2. Extract the `custom_components/fileflows` folder to your `config/custom_components/` directory
 3. Restart Home Assistant
-4. Go to Settings → Devices & Services → Add Integration → FileFlows
+4. Go to **Settings** → **Devices & Services** → **Add Integration** → **FileFlows**
 
-## Configuration
+## ⚙️ Configuration
 
-During setup, you'll need:
-- **Host**: IP address or hostname of your FileFlows server
-- **Port**: Port number (default: 8585)
-- **SSL**: Enable if using HTTPS
-- **Verify SSL**: Disable for self-signed certificates
-- **Username**: FileFlows username (optional - required for full API access)
-- **Password**: FileFlows password (optional - required for full API access)
+### Initial Setup
+
+When adding the integration, you'll need:
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| **Host** | Yes | - | IP address or hostname of FileFlows server |
+| **Port** | Yes | 8585 | FileFlows server port |
+| **SSL** | No | false | Enable for HTTPS connections |
+| **Verify SSL** | No | true | Disable for self-signed certificates |
+| **Username** | Recommended | - | FileFlows username |
+| **Password** | Recommended | - | FileFlows password |
 
 ### Authentication
 
-The integration uses Bearer token authentication:
-- If credentials are provided, the integration will automatically login and obtain a Bearer token
-- Bearer tokens are cached for 23 hours and automatically renewed when needed
-- Without credentials, only public `/remote/*` endpoints are accessible (limited data)
+**Bearer Token Authentication** (Automatic):
+- Provide username and password during setup
+- Integration automatically obtains and manages Bearer tokens
+- Tokens cached for 23 hours and auto-renewed
+- Full API access with all 17 endpoints
 
-## Example Dashboard Card
+**Without Authentication**:
+- Limited to public `/remote/*` endpoints
+- Reduced functionality and data availability
+- **Recommended to always use credentials**
 
+## 📊 Dashboard Examples
+
+### Basic Card
 ```yaml
 type: entities
-title: FileFlows
+title: FileFlows Status
 entities:
-  - entity: binary_sensor.fileflows_processing_active
-  - entity: sensor.fileflows_queue_size
-  - entity: sensor.fileflows_current_file
-  - entity: sensor.fileflows_storage_saved
-  - entity: sensor.fileflows_cpu_usage
-  - entity: sensor.fileflows_memory_usage
-  - entity: switch.fileflows_system_active
+  - entity: binary_sensor.fileflows_192_168_178_8_processing_active
+  - entity: sensor.fileflows_192_168_178_8_queue_size
+  - entity: sensor.fileflows_192_168_178_8_current_file
+  - entity: sensor.fileflows_192_168_178_8_storage_saved
+  - entity: sensor.fileflows_192_168_178_8_storage_saved_percentage
+  - entity: switch.fileflows_192_168_178_8_system_active
 ```
 
-## Automation Examples
+### Storage Savings Card
+```yaml
+type: custom:bar-card
+entity: sensor.fileflows_192_168_178_8_storage_saved
+name: Storage Saved
+unit_of_measurement: GB
+max: 3000
+positions:
+  icon: inside
+  indicator: inside
+  name: inside
+  value: inside
+severity:
+  - color: '#4CAF50'
+    from: 0
+    to: 3000
+```
 
-### Pause FileFlows during Plex streaming
+### Processing Queue Card
+```yaml
+type: glance
+title: FileFlows Queue
+entities:
+  - entity: sensor.fileflows_192_168_178_8_unprocessed_files
+    name: Unprocessed
+  - entity: sensor.fileflows_192_168_178_8_processing_files
+    name: Processing
+  - entity: sensor.fileflows_192_168_178_8_processed_files
+    name: Processed
+  - entity: sensor.fileflows_192_168_178_8_failed_files
+    name: Failed
+```
 
+## 🤖 Automation Examples
+
+### Pause FileFlows during Plex Streaming
 ```yaml
 automation:
   - alias: "Pause FileFlows during Plex"
     trigger:
-      - platform: state
+      - platform: numeric_state
         entity_id: sensor.plex_watching
-        to: "1"
+        above: 0
     action:
       - service: fileflows.pause_system
 
   - alias: "Resume FileFlows after Plex"
     trigger:
-      - platform: state
+      - platform: numeric_state
         entity_id: sensor.plex_watching
-        to: "0"
+        below: 1
         for:
           minutes: 5
     action:
       - service: fileflows.resume_system
 ```
 
-### Notify on failed files
-
+### Notify on Failed Files
 ```yaml
 automation:
-  - alias: "Notify FileFlows failures"
+  - alias: "Alert on FileFlows failures"
     trigger:
       - platform: state
-        entity_id: binary_sensor.fileflows_has_failed_files
+        entity_id: binary_sensor.fileflows_192_168_178_8_has_failed_files
         to: "on"
     action:
-      - service: notify.mobile_app
+      - service: notify.mobile_app_phone
         data:
-          title: "FileFlows Alert"
-          message: "{{ state_attr('sensor.fileflows_files_failed', 'failed_count') }} files have failed processing"
+          title: "⚠️ FileFlows Alert"
+          message: "{{ states('sensor.fileflows_192_168_178_8_failed_files') }} files have failed processing"
 ```
 
-## API Coverage
+### Rescan Library on Schedule
+```yaml
+automation:
+  - alias: "Weekly Library Rescan"
+    trigger:
+      - platform: time
+        at: "03:00:00"
+    condition:
+      - condition: time
+        weekday:
+          - sun
+    action:
+      - service: fileflows.rescan_all_libraries
+```
 
-This integration uses the following FileFlows API endpoints:
-- `/api/status` - System status
-- `/api/system/info` - System information (CPU, memory)
-- `/api/system/version` - Version info
-- `/api/system/pause` - Pause/Resume
-- `/api/system/restart` - Server restart
-- `/api/settings/fileflows-status` - FileFlows status
+### Monitor Storage Savings Milestone
+```yaml
+automation:
+  - alias: "Storage Savings Milestone"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.fileflows_192_168_178_8_storage_saved
+        above: 2500
+    action:
+      - service: notify.mobile_app_phone
+        data:
+          title: "🎉 FileFlows Milestone!"
+          message: "You've saved {{ states('sensor.fileflows_192_168_178_8_storage_saved') }} GB!"
+```
+
+## 🔌 API Coverage
+
+The integration uses **17 working FileFlows API endpoints**:
+
+### Core Endpoints
+- `/api/status` - Real-time system status
+- `/api/statistics/storage-saved` - Detailed storage statistics ⭐ NEW
+- `/api/library-file/status` - File status overview
+- `/api/settings/fileflows-status` - System pause state
+
+### Resource Endpoints
 - `/api/node` - Processing nodes
-- `/api/library` - Libraries
-- `/api/library-file/status` - File status counts
-- `/api/library-file/upcoming` - Upcoming files
-- `/api/library-file/recently-finished` - Recent files
-- `/api/library-file/shrinkage-groups` - Storage savings
-- `/api/flow` - Flows
-- `/api/worker` - Running workers
+- `/api/library` - Libraries configuration
+- `/api/flow` - Processing flows
+- `/api/plugin` - Installed plugins
 - `/api/task` - Scheduled tasks
-- `/api/plugin` - Plugins
-- `/api/nvidia/smi` - NVIDIA GPU info
 
-## Support
+### Data Endpoints
+- `/api/library-file/upcoming` - Queue preview
+- `/api/library-file/recently-finished` - Recent completions
+- `/api/nvidia/smi` - NVIDIA GPU stats (if available)
 
-- [GitHub Issues](https://github.com/RiDDiX/fileflows-ha/issues)
+### Version & Updates
+- `/api/system/version` - Version information
+
+See [API_ENDPOINTS.md](API_ENDPOINTS.md) for complete endpoint documentation.
+
+## 📚 Documentation
+
+- [CHANGELOG.md](CHANGELOG.md) - Version history and changes
+- [API_ENDPOINTS.md](API_ENDPOINTS.md) - Complete API endpoint reference
+- [SETUP_COMPLETE.md](SETUP_COMPLETE.md) - Detailed setup guide and troubleshooting
+
+## 🐛 Troubleshooting
+
+### Integration won't connect
+- Verify FileFlows is running and accessible
+- Check host/port are correct
+- Ensure credentials are valid
+- Test manually: `curl -X POST -H "Content-Type: application/json" -d '{"username":"USER","password":"PASS"}' http://HOST:8585/authorize`
+
+### Sensors show "unknown"
+- Ensure username/password are configured
+- Check Home Assistant logs for errors
+- Reload the integration
+- See [SETUP_COMPLETE.md](SETUP_COMPLETE.md) for detailed troubleshooting
+
+### Some sensors missing
+- **CPU/Memory sensors**: Removed in v2.1.1 (endpoint doesn't exist on modern FileFlows)
+- **NVIDIA sensors**: Only created if GPU detected
+- **Failed/On Hold sensors**: May show "unknown" if endpoint unavailable
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 💡 Credits
+
+- Created by [@RiDDiX](https://github.com/RiDDiX)
+- Built for [FileFlows](https://fileflows.com/)
+- Developed with assistance from Claude Code
+
+## 🔗 Links
+
+- [GitHub Repository](https://github.com/RiDDiX/fileflows-ha)
+- [Issue Tracker](https://github.com/RiDDiX/fileflows-ha/issues)
+- [FileFlows Official Site](https://fileflows.com/)
 - [FileFlows Documentation](https://fileflows.com/docs)
 
-## License
+---
 
-MIT License
+**Latest Release**: v2.1.1 | **Sensors**: 24 Core + 5 NVIDIA | **API Endpoints**: 17 Working

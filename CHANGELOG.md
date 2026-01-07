@@ -5,6 +5,34 @@ All notable changes to the FileFlows Home Assistant Integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-01-06
+
+### Removed
+- **CPU Usage sensor** - `/api/system/info` endpoint doesn't exist on modern FileFlows servers
+- **Memory Usage sensor** - Same endpoint unavailability
+- **Temp Directory Size sensor** - Same endpoint unavailability
+- **Log Directory Size sensor** - Same endpoint unavailability
+- Reduced from 28 to 24 core sensors (NVIDIA sensors unchanged)
+
+### Fixed
+- **"Unauthorized: Invalid API token" errors** in FileFlows server logs
+  - Stopped calling `/remote/info/shrinkage-groups` when authenticated
+  - Stopped calling `/remote/info/update-available` when authenticated
+  - Remote endpoints only used as fallback when no credentials configured
+- **Cleaner API call pattern**: Only authenticated endpoints called when credentials available
+
+### Changed
+- API client now properly distinguishes between authenticated and unauthenticated modes
+- Storage statistics fetching uses new endpoint when authenticated, skips remote endpoints
+- Update checking only attempts remote endpoint when no authentication configured
+
+### Technical Details
+- Removed 4 sensors from sensor.py (lines 205-251)
+- Fixed api.py get_all_data() to conditionally call endpoints based on auth status
+- 2 files changed: +12 insertions, -60 deletions
+
+---
+
 ## [2.1.0] - 2026-01-06
 
 ### Added
