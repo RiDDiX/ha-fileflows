@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_CONFIG_ENTRY_ID, CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, ServiceCall

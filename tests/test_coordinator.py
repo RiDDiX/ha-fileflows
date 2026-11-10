@@ -6,11 +6,11 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.fileflows.const import DOMAIN
 from custom_components.fileflows.coordinator import FileFlowsDataUpdateCoordinator
-from homeassistant.core import HomeAssistant
 
 from .conftest import ENTRY_DATA, FENRUS, FENRUS_TOKEN, default_routes
 
