@@ -5,6 +5,22 @@ All notable changes to the FileFlows Home Assistant Integration will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-10
+
+### Changed
+Authentication now uses FileFlows API token with HMAC signed requests for FileFlows 26.10 and later. Username and password login is removed by FileFlows. Existing entries ask for re authentication. Entity ids are unchanged.
+
+### Added
+Optional Fenrus endpoint token for licence free read only mode. Reauth and reconfigure flows. Update interval option now applies. Services take optional config_entry_id. pause_system takes minutes. Translations in en.json. Tests and CI validation including hassfest, HACS, ruff, and pytest.
+
+### Removed
+Remote info endpoints. strings.json. Root diagnostic scripts and duplicate release notes.
+
+### Fixed
+Entities show unavailable instead of 0 when the server is unreachable. System Paused binary sensor polarity. Wrong repo URLs in manifest. Routes aligned with api help for library file list all, Uids bodies, and OnHold status.
+
+Minimum Home Assistant 2025.8
+
 ## [2.1.1] - 2026-01-06
 
 ### Removed
