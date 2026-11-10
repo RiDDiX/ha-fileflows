@@ -1,25 +1,42 @@
 """Config flow for FileFlows integration."""
+
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
 
-from homeassistant import config_entries
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
-from .api import FileFlowsApi, FileFlowsApiError, FileFlowsAuthError, FileFlowsConnectionError
+from .api import (
+    FileFlowsApi,
+    FileFlowsApiDisabledError,
+    FileFlowsApiError,
+    FileFlowsAuthError,
+)
 from .const import (
-    CONF_PASSWORD,
+    CONF_API_TOKEN,
+    CONF_FENRUS_TOKEN,
+    CONF_SCAN_INTERVAL,
     CONF_SSL,
-    CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SSL,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
@@ -27,177 +44,172 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+TOKEN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+TOKENS = (CONF_API_TOKEN, CONF_FENRUS_TOKEN)
 
-def get_schema(
-    host: str = "",
-    port: int = DEFAULT_PORT,
-    ssl: bool = DEFAULT_SSL,
-    verify_ssl: bool = DEFAULT_VERIFY_SSL,
-    username: str = "",
-    password: str = "",
-) -> vol.Schema:
-    """Get the config schema."""
-    return vol.Schema(
-        {
-            vol.Required(CONF_HOST, default=host): str,
-            vol.Required(CONF_PORT, default=port): int,
-            vol.Required(CONF_SSL, default=ssl): bool,
-            vol.Required(CONF_VERIFY_SSL, default=verify_ssl): bool,
-            vol.Optional(CONF_USERNAME, default=username): str,
-            vol.Optional(CONF_PASSWORD, default=password): str,
-        }
-    )
+TOKEN_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_API_TOKEN): TOKEN_SELECTOR,
+        vol.Optional(CONF_FENRUS_TOKEN): TOKEN_SELECTOR,
+    }
+)
+
+USER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_HOST): str,
+        vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Required(CONF_SSL, default=DEFAULT_SSL): bool,
+        vol.Required(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): bool,
+    }
+).extend(TOKEN_SCHEMA.schema)
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
-    _LOGGER.debug("Validating FileFlows connection to %s:%s", data[CONF_HOST], data.get(CONF_PORT, DEFAULT_PORT))
+def _tokens(user_input: Mapping[str, Any]) -> dict[str, str | None]:
+    """Return both token keys, None for blank ones, so stale tokens get cleared."""
+    return {key: (user_input.get(key) or "").strip() or None for key in TOKENS}
 
-    session = async_get_clientsession(hass, verify_ssl=data.get(CONF_VERIFY_SSL, True))
 
-    # Clean username/password - convert empty strings to None
-    username = data.get(CONF_USERNAME, "").strip() or None
-    password = data.get(CONF_PASSWORD, "").strip() or None
+def _connection(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the form input with a trimmed host and normalized tokens."""
+    return {
+        **user_input,
+        CONF_HOST: user_input[CONF_HOST].strip(),
+        **_tokens(user_input),
+    }
 
-    api = FileFlowsApi(
-        host=data[CONF_HOST],
-        port=data.get(CONF_PORT, DEFAULT_PORT),
-        ssl=data.get(CONF_SSL, DEFAULT_SSL),
-        verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        username=username,
-        password=password,
-        session=session,
-    )
 
-    # Test connection - if credentials provided, this will use Bearer auth
+async def _validate(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
+    """Return form errors for the given connection data."""
     try:
-        _LOGGER.debug("Testing connection...")
-        if not await api.test_connection():
-            _LOGGER.error("Connection test failed")
-            raise CannotConnect("Connection test failed")
-        _LOGGER.debug("Connection successful")
-    except FileFlowsConnectionError as err:
-        _LOGGER.error("Connection error: %s", err)
-        raise CannotConnect from err
-    except FileFlowsAuthError as err:
-        _LOGGER.error("Authentication error during connection: %s", err)
-        raise InvalidAuth from err
-    except Exception as err:
-        _LOGGER.error("Unexpected error during connection test: %s", err)
-        raise CannotConnect(str(err)) from err
-
-    # Get version info
+        api = FileFlowsApi(
+            async_get_clientsession(
+                hass, verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+            ),
+            data[CONF_HOST],
+            data.get(CONF_PORT, DEFAULT_PORT),
+            data.get(CONF_SSL, DEFAULT_SSL),
+            data.get(CONF_API_TOKEN),
+            data.get(CONF_FENRUS_TOKEN),
+        )
+    except ValueError:
+        # yarl rejects schemes, paths, spaces, empty hosts and bad ports
+        return {CONF_HOST: "invalid_host"}
+    if not data.get(CONF_API_TOKEN) and not data.get(CONF_FENRUS_TOKEN):
+        return {"base": "no_token"}
     try:
-        _LOGGER.debug("Getting version info...")
-        version = await api.get_version()
-        _LOGGER.debug("Version: %s", version)
-    except Exception as err:
-        _LOGGER.error("Failed to get version: %s", err)
-        version = "Unknown"
-
-    # If username/password provided, verify Bearer token authentication
-    if username and password:
-        _LOGGER.info("Credentials provided, verifying Bearer token authentication...")
-        _LOGGER.debug("Username: %s", username)
-
-        try:
-            # Try to get Bearer token to verify credentials work
-            token = await api._get_bearer_token()
-
-            if not token:
-                _LOGGER.error("Failed to obtain Bearer token - no token returned")
-                raise InvalidAuth("Failed to obtain Bearer token")
-
-            _LOGGER.info("Bearer token acquired successfully (token length: %d)", len(token))
-            _LOGGER.info("Bearer token authentication verified - connection test already validated API access")
-
-        except FileFlowsAuthError as err:
-            _LOGGER.error("Bearer authentication failed: %s", err)
-            raise InvalidAuth from err
-        except Exception as err:
-            _LOGGER.error("Unexpected error during authentication: %s", err)
-            raise InvalidAuth(str(err)) from err
-    else:
-        _LOGGER.info("No credentials provided - limited functionality (public endpoints only)")
-
-    return {"title": f"FileFlows ({data[CONF_HOST]})", "version": version}
+        await api.async_validate()
+    except FileFlowsAuthError:
+        return {"base": "invalid_auth"}
+    except FileFlowsApiDisabledError:
+        return {"base": "api_disabled"}
+    except FileFlowsApiError:
+        return {"base": "cannot_connect"}
+    except Exception:
+        _LOGGER.exception("Unexpected exception")
+        return {"base": "unknown"}
+    return {}
 
 
-class FileFlowsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class FileFlowsConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for FileFlows."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
-
         if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                # Check if already configured
-                await self.async_set_unique_id(
-                    f"{user_input[CONF_HOST]}:{user_input.get(CONF_PORT, DEFAULT_PORT)}"
+            data = _connection(user_input)
+            await self.async_set_unique_id(f"{data[CONF_HOST]}:{data[CONF_PORT]}")
+            self._abort_if_unique_id_configured()
+            if not (errors := await _validate(self.hass, data)):
+                return self.async_create_entry(
+                    title=f"FileFlows ({data[CONF_HOST]})", data=data
                 )
-                self._abort_if_unique_id_configured()
-
-                return self.async_create_entry(title=info["title"], data=user_input)
-
         return self.async_show_form(
             step_id="user",
-            data_schema=get_schema(),
+            data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, user_input),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Start reauthentication."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for new tokens."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+        if user_input is not None:
+            tokens = _tokens(user_input)
+            if not (errors := await _validate(self.hass, {**entry.data, **tokens})):
+                return self.async_update_reload_and_abort(entry, data_updates=tokens)
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=TOKEN_SCHEMA,
+            errors=errors,
+            description_placeholders={"host": entry.data[CONF_HOST]},
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change connection settings."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            data = _connection(user_input)
+            unique_id = f"{data[CONF_HOST]}:{data[CONF_PORT]}"
+            if unique_id != entry.unique_id:
+                await self.async_set_unique_id(unique_id)
+                self._abort_if_unique_id_configured()
+            if not (errors := await _validate(self.hass, data)):
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=unique_id,
+                    title=f"FileFlows ({data[CONF_HOST]})",
+                    data_updates=data,
+                )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                USER_SCHEMA, user_input or entry.data
+            ),
             errors=errors,
         )
 
     @staticmethod
     @callback
-    def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
-    ) -> FileFlowsOptionsFlowHandler:
+    def async_get_options_flow(config_entry: ConfigEntry) -> FileFlowsOptionsFlow:
         """Get the options flow for this handler."""
-        return FileFlowsOptionsFlowHandler(config_entry)
+        return FileFlowsOptionsFlow()
 
 
-class FileFlowsOptionsFlowHandler(config_entries.OptionsFlow):
+class FileFlowsOptionsFlow(OptionsFlowWithReload):
     """Handle FileFlows options."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
+            return self.async_create_entry(data=user_input)
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(
-                        "scan_interval",
-                        default=self.config_entry.options.get("scan_interval", 30),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
+                    vol.Required(
+                        CONF_SCAN_INTERVAL,
+                        default=self.config_entry.options.get(
+                            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=10, max=3600)),
                 }
             ),
         )
-
-
-class CannotConnect(Exception):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(Exception):
-    """Error to indicate there is invalid auth."""

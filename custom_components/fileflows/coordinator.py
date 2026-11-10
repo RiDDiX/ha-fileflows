@@ -1,581 +1,375 @@
 """DataUpdateCoordinator for FileFlows."""
+
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from datetime import timedelta
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import FileFlowsApi, FileFlowsApiError
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .api import (
+    FileFlowsApi,
+    FileFlowsApiError,
+    FileFlowsAuthError,
+    FileFlowsNotFoundError,
+)
+from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+type FileFlowsConfigEntry = ConfigEntry[FileFlowsDataUpdateCoordinator]
+
+INDEXED = ("nodes", "libraries", "flows", "tasks")
+GIB = 1024**3
 
 
 class FileFlowsDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Class to manage fetching FileFlows data."""
 
-    config_entry: ConfigEntry
+    config_entry: FileFlowsConfigEntry
 
     def __init__(
-        self,
-        hass: HomeAssistant,
-        api: FileFlowsApi,
-        update_interval: timedelta = DEFAULT_SCAN_INTERVAL,
+        self, hass: HomeAssistant, entry: FileFlowsConfigEntry, api: FileFlowsApi
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
-            update_interval=update_interval,
+            update_interval=timedelta(
+                seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            ),
         )
         self.api = api
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
+        previous_version = self.version
         try:
-            return await self.api.get_all_data()
+            data = await self.api.get_all_data()
+        except FileFlowsAuthError as err:
+            raise ConfigEntryAuthFailed(str(err)) from err
+        except FileFlowsNotFoundError as err:
+            endpoint = "REST API" if self.api.has_api else "Fenrus endpoint"
+            raise UpdateFailed(
+                f"The FileFlows {endpoint} is disabled or unlicensed: {err}"
+            ) from err
         except FileFlowsApiError as err:
             raise UpdateFailed(f"Error communicating with FileFlows: {err}") from err
+        data["index"] = {
+            kind: {
+                item["Uid"]: item for item in data.get(kind) or [] if item.get("Uid")
+            }
+            for kind in INDEXED
+        }
+        version = data.get("version")
+        if self.data and version and version != previous_version:
+            registry = dr.async_get(self.hass)
+            device = registry.async_get_device(
+                identifiers={(DOMAIN, self.config_entry.entry_id)}
+            )
+            if device:
+                registry.async_update_device(device.id, sw_version=version)
+        return data
 
-    # =========================================================================
-    # Status Properties (from PUBLIC /remote/info/status endpoint)
-    # =========================================================================
-    @property
-    def remote_status(self) -> dict[str, Any]:
-        """Get status data from /remote/info/status (public endpoint).
-        
-        Returns: {queue, processing, processed, time, processingFiles[]}
-        """
-        return self.data.get("remote_status", {}) if self.data else {}
+    async def async_action(self, call: Awaitable[Any]) -> None:
+        """Run a write call, surface failures to the user and refresh."""
+        try:
+            await call
+        except FileFlowsApiError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="api_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
+        await self.async_request_refresh()
 
-    @property
-    def is_paused(self) -> bool:
-        """Check if system is paused."""
-        # Check fileflows_status first (from authenticated endpoint)
-        status = self.fileflows_status
-        if status:
-            return status.get("IsPaused", False)
-        # Fall back to system_info
-        return self.system_info.get("IsPaused", False)
+    def _get(self, key: str) -> Any:
+        return self.data.get(key) if self.data else None
 
-    @property
-    def queue_from_remote(self) -> int:
-        """Get queue size from remote status."""
-        return self.remote_status.get("queue", 0)
+    def item(self, kind: str, uid: str) -> dict[str, Any] | None:
+        """Return a node, library, flow or task by Uid."""
+        return self.index(kind).get(uid)
 
-    @property
-    def processing_from_remote(self) -> int:
-        """Get processing count from remote status."""
-        return self.remote_status.get("processing", 0)
+    def index(self, kind: str) -> dict[str, dict[str, Any]]:
+        """Return the items of one kind keyed by Uid."""
+        return self._get("index").get(kind, {}) if self.data else {}
 
-    @property
-    def processed_from_remote(self) -> int:
-        """Get processed count from remote status."""
-        return self.remote_status.get("processed", 0)
-
-    @property
-    def processing_time(self) -> str:
-        """Get processing time from remote status."""
-        return self.remote_status.get("time", "")
-
-    @property
-    def processing_files(self) -> list[dict[str, Any]]:
-        """Get currently processing files from remote status.
-        
-        Returns: [{name, relativePath, library, step, stepPercent}, ...]
-        """
-        return self.remote_status.get("processingFiles", [])
-
-    # =========================================================================
-    # System Info Properties
-    # =========================================================================
-    @property
-    def system_info(self) -> dict[str, Any]:
-        """Get system info from /api/system/info."""
-        return self.data.get("system_info", {}) if self.data else {}
+    # Status
 
     @property
-    def fileflows_status(self) -> dict[str, Any]:
-        """Get fileflows status from /api/settings/fileflows-status."""
-        return self.data.get("fileflows_status", {}) if self.data else {}
+    def status(self) -> dict[str, Any] | None:
+        """Return /api/status data."""
+        return self._get("status")
 
     @property
-    def version(self) -> str:
-        """Get FileFlows version."""
-        return self.data.get("version", "Unknown") if self.data else "Unknown"
+    def fenrus(self) -> dict[str, Any] | None:
+        """Return /webhook/fenrus data."""
+        return self._get("fenrus")
 
     @property
-    def update_available(self) -> bool:
-        """Check if update is available."""
-        return self.data.get("update_available", False) if self.data else False
+    def is_paused(self) -> bool | None:
+        """Return whether processing is paused."""
+        settings = self._get("settings")
+        return settings.get("IsPaused") if settings else None
 
     @property
-    def cpu_usage(self) -> float:
-        """Get CPU usage percentage."""
-        return self.system_info.get("CpuUsage", 0.0)
+    def version(self) -> str | None:
+        """Return the server version."""
+        return self._get("version")
 
     @property
-    def memory_usage(self) -> float:
-        """Get memory usage percentage."""
-        return self.system_info.get("MemoryUsage", 0.0)
+    def update_available(self) -> bool | None:
+        """Return whether an update is available."""
+        return self.fenrus.get("UpdateAvailable") if self.fenrus else None
 
     @property
-    def memory_used_mb(self) -> float:
-        """Get memory used in MB."""
-        return self.system_info.get("MemoryUsed", 0) / (1024 * 1024)
+    def processing_time(self) -> str | None:
+        """Return the processing time reported by the server."""
+        return self.status.get("time") if self.status else None
 
     @property
-    def memory_total_mb(self) -> float:
-        """Get total memory in MB."""
-        return self.system_info.get("MemoryTotal", 0) / (1024 * 1024)
+    def processing_files(self) -> list[dict[str, Any]] | None:
+        """Return the files being processed right now."""
+        files = self.status.get("processingFiles") if self.status else None
+        if not isinstance(files, list):
+            return None
+        return [f for f in files if isinstance(f, dict)]
+
+    # Counts
+
+    def _count(
+        self, name: str, status_key: str | None = None, *, status_first: bool = True
+    ) -> int | None:
+        """Return the first non-null count from status, file status and fenrus."""
+        sources = [(self._get("library_file_status"), name), (self.fenrus, name)]
+        if status_key:
+            sources.insert(
+                0 if status_first else len(sources), (self.status, status_key)
+            )
+        for source, key in sources:
+            if source and (value := source.get(key)) is not None:
+                return value
+        return None
 
     @property
-    def temp_directory_size_gb(self) -> float:
-        """Get temp directory size in GB."""
-        size = self.system_info.get("TempDirectorySize", 0)
-        return round(size / (1024 ** 3), 2)
+    def files_unprocessed(self) -> int | None:
+        """Return the number of unprocessed files."""
+        return self._count("Unprocessed", "queue", status_first=False)
 
     @property
-    def log_directory_size_gb(self) -> float:
-        """Get log directory size in GB."""
-        size = self.system_info.get("LogDirectorySize", 0)
-        return round(size / (1024 ** 3), 2)
-
-    # =========================================================================
-    # Node Properties
-    # =========================================================================
-    @property
-    def nodes(self) -> list[dict[str, Any]]:
-        """Get all processing nodes."""
-        return self.data.get("nodes", []) if self.data else []
+    def files_processed(self) -> int | None:
+        """Return the number of processed files."""
+        return self._count("Processed", "processed")
 
     @property
-    def nodes_count(self) -> int:
-        """Get number of nodes."""
-        return len(self.nodes)
+    def files_processing(self) -> int | None:
+        """Return the number of files being processed."""
+        return self._count("Processing", "processing")
 
     @property
-    def enabled_nodes_count(self) -> int:
-        """Get number of enabled nodes."""
-        return len([n for n in self.nodes if n.get("Enabled", False)])
+    def files_failed(self) -> int | None:
+        """Return the number of failed files."""
+        return self._count("Failed")
 
     @property
-    def total_runners(self) -> int:
-        """Get total number of runners from all enabled nodes."""
-        return sum(n.get("FlowRunners", 0) for n in self.nodes if n.get("Enabled", False))
-
-    # =========================================================================
-    # Library Properties
-    # =========================================================================
-    @property
-    def libraries(self) -> list[dict[str, Any]]:
-        """Get all libraries."""
-        return self.data.get("libraries", []) if self.data else []
+    def files_on_hold(self) -> int | None:
+        """Return the number of files on hold."""
+        return self._count("OnHold")
 
     @property
-    def libraries_count(self) -> int:
-        """Get number of libraries."""
-        return len(self.libraries)
+    def files_out_of_schedule(self) -> int | None:
+        """Return the number of files out of schedule."""
+        return self._count("OutOfSchedule")
 
     @property
-    def enabled_libraries_count(self) -> int:
-        """Get number of enabled libraries."""
-        return len([lib for lib in self.libraries if lib.get("Enabled", False)])
+    def queue_size(self) -> int | None:
+        """Return the queue size."""
+        return self._count("Unprocessed", "queue")
 
-    # =========================================================================
-    # Flow Properties
-    # =========================================================================
-    @property
-    def flows(self) -> list[dict[str, Any]]:
-        """Get all flows."""
-        return self.data.get("flows", []) if self.data else []
+    # Workers
 
     @property
-    def flows_count(self) -> int:
-        """Get number of flows."""
-        return len(self.flows)
+    def workers(self) -> list[dict[str, Any]] | None:
+        """Return running workers."""
+        return self._get("workers")
 
     @property
-    def enabled_flows_count(self) -> int:
-        """Get number of enabled flows."""
-        return len([f for f in self.flows if f.get("Enabled", False)])
-
-    # =========================================================================
-    # Worker Properties (combines remote_status + /api/worker)
-    # =========================================================================
-    @property
-    def workers(self) -> list[dict[str, Any]]:
-        """Get all running workers/executors from authenticated endpoint."""
-        return self.data.get("workers", []) if self.data else []
+    def active_workers(self) -> int | None:
+        """Return the number of active workers."""
+        if self.processing_files:
+            return len(self.processing_files)
+        if self.workers is not None:
+            return len(self.workers)
+        return None if self.processing_files is None else 0
 
     @property
-    def active_workers(self) -> int:
-        """Get number of active workers."""
-        # Use processing_files from public endpoint as primary source
-        pf = self.processing_files
-        if pf:
-            return len(pf)
-        # Fall back to workers from authenticated endpoint
-        return len(self.workers)
-
-    @property
-    def is_processing(self) -> bool:
-        """Check if any files are being processed."""
-        # Use remote_status first (public endpoint)
+    def is_processing(self) -> bool | None:
+        """Return whether any file is being processed."""
         if self.processing_files:
             return True
-        if self.processing_from_remote > 0:
-            return True
-        # Fall back to workers
-        return len(self.workers) > 0
+        if (processing := self.files_processing) is not None:
+            return processing > 0
+        return None if self.workers is None else bool(self.workers)
+
+    def _current(self, key: str) -> Any:
+        return self.processing_files[0].get(key) if self.processing_files else None
 
     @property
     def current_file(self) -> str | None:
-        """Get current processing file name."""
-        # Use processingFiles from remote_status first
-        pf = self.processing_files
-        if pf:
-            return pf[0].get("name", pf[0].get("relativePath", "Unknown"))
-        # Fall back to workers
-        if self.workers:
-            worker = self.workers[0]
-            return worker.get("CurrentFile", worker.get("LibraryFile", {}).get("Name", "Unknown"))
-        return None
+        """Return the name of the file being processed."""
+        if self.processing_files:
+            first = self.processing_files[0]
+            return first.get("name") or first.get("relativePath")
+        return self.workers[0].get("DisplayName") if self.workers else None
 
     @property
-    def current_file_progress(self) -> float:
-        """Get current file progress percentage."""
-        # Use processingFiles from remote_status first
-        pf = self.processing_files
-        if pf:
-            return pf[0].get("stepPercent", 0.0)
-        # Fall back to workers
-        if self.workers:
-            return self.workers[0].get("CurrentPartPercent", 0.0)
-        return 0.0
+    def current_file_progress(self) -> float | None:
+        """Return the progress of the current file."""
+        return self._current("stepPercent")
 
     @property
     def current_step(self) -> str | None:
-        """Get current processing step name."""
-        pf = self.processing_files
-        if pf:
-            return pf[0].get("step", None)
-        if self.workers:
-            return self.workers[0].get("CurrentPartName", None)
-        return None
+        """Return the current processing step."""
+        return self._current("step")
 
-    # =========================================================================
-    # Library File Status Properties (combines remote + authenticated data)
-    # =========================================================================
-    @property
-    def library_file_status(self) -> dict[str, Any]:
-        """Get library file status overview from authenticated endpoint."""
-        return self.data.get("library_file_status", {}) if self.data else {}
+    # Lists
 
     @property
-    def files_unprocessed(self) -> int:
-        """Get unprocessed files count."""
-        # Use queue from remote_status as primary (public endpoint)
-        queue = self.queue_from_remote
-        if queue is not None and queue >= 0:
-            return queue
-        # Fall back to library_file_status (authenticated)
-        return self.library_file_status.get("Unprocessed", 0)
+    def nodes(self) -> list[dict[str, Any]] | None:
+        """Return processing agents."""
+        return self._get("nodes")
 
     @property
-    def files_processed(self) -> int:
-        """Get processed files count."""
-        # Use processed from remote_status as primary
-        processed = self.processed_from_remote
-        if processed is not None and processed >= 0:
-            return processed
-        # Fall back to library_file_status
-        return self.library_file_status.get("Processed", 0)
+    def libraries(self) -> list[dict[str, Any]] | None:
+        """Return libraries."""
+        return self._get("libraries")
 
     @property
-    def files_processing(self) -> int:
-        """Get processing files count."""
-        # Use processing from remote_status as primary
-        processing = self.processing_from_remote
-        if processing is not None and processing >= 0:
-            return processing
-        # Or count processingFiles
-        pf = self.processing_files
-        if pf:
-            return len(pf)
-        # Fall back to library_file_status
-        return self.library_file_status.get("Processing", 0)
+    def flows(self) -> list[dict[str, Any]] | None:
+        """Return flows."""
+        return self._get("flows")
 
     @property
-    def files_failed(self) -> int:
-        """Get failed files count."""
-        return self.library_file_status.get("Failed", 0)
+    def tasks(self) -> list[dict[str, Any]] | None:
+        """Return scheduled tasks."""
+        return self._get("tasks")
 
     @property
-    def files_on_hold(self) -> int:
-        """Get on hold files count."""
-        return self.library_file_status.get("OnHold", 0)
+    def plugins(self) -> list[dict[str, Any]] | None:
+        """Return plugins."""
+        return self._get("plugins")
 
     @property
-    def files_out_of_schedule(self) -> int:
-        """Get out of schedule files count."""
-        return self.library_file_status.get("OutOfSchedule", 0)
+    def upcoming_files(self) -> list[dict[str, Any]] | None:
+        """Return the next files to process."""
+        return self._get("upcoming_files")
 
     @property
-    def files_disabled(self) -> int:
-        """Get disabled files count."""
-        return self.library_file_status.get("Disabled", 0)
+    def recently_finished(self) -> list[dict[str, Any]] | None:
+        """Return recently finished files."""
+        return self._get("recently_finished")
 
     @property
-    def queue_size(self) -> int:
-        """Get total queue size.
-
-        Uses queue from remote_status endpoint as primary source.
-        """
-        # Remote status queue is the authoritative source
-        queue = self.queue_from_remote
-        if queue is not None and queue >= 0:
-            return queue
-        # Fall back to unprocessed + processing from library_file_status
-        return self.files_unprocessed + self.files_processing
-
-    # =========================================================================
-    # Upcoming & Recently Finished
-    # =========================================================================
-    @property
-    def upcoming_files(self) -> list[dict[str, Any]]:
-        """Get upcoming files to process."""
-        return self.data.get("upcoming_files", []) if self.data else []
+    def enabled_nodes_count(self) -> int | None:
+        """Return the number of enabled agents."""
+        return enabled_count(self.nodes)
 
     @property
-    def recently_finished(self) -> list[dict[str, Any]]:
-        """Get recently finished files."""
-        return self.data.get("recently_finished", []) if self.data else []
+    def total_runners(self) -> int | None:
+        """Return the runners of all enabled agents."""
+        if self.nodes is None:
+            return None
+        return sum(n.get("FlowRunners") or 0 for n in self.nodes if n.get("Enabled"))
 
-    # =========================================================================
-    # Shrinkage Properties (legacy /remote/info/shrinkage-groups)
-    # =========================================================================
-    @property
-    def shrinkage_groups(self) -> list[dict[str, Any]]:
-        """Get shrinkage data grouped by library from legacy endpoint."""
-        return self.data.get("shrinkage_groups", []) if self.data else []
+    # Storage
 
-    # =========================================================================
-    # Storage Savings Properties (from /api/statistics/storage-saved)
-    # =========================================================================
-    @property
-    def storage_saved_stats(self) -> dict[str, Any]:
-        """Get storage saved statistics from /api/statistics/storage-saved.
-
-        Returns: {
-            series: [{name: "Final Size", data: [...]}, {name: "Savings", data: [...]}, ...],
-            labels: ["Library1", "Library2", "Total"],
-            items: [count1, count2, totalCount]
-        }
-        """
-        return self.data.get("storage_saved_stats", {}) if self.data else {}
-
-    @property
-    def storage_saved_bytes(self) -> int:
-        """Get total storage saved in bytes.
-
-        Uses /api/statistics/storage-saved if available (more reliable),
-        falls back to shrinkage_groups if not.
-        """
-        # Try new endpoint first
-        stats = self.storage_saved_stats
-        if stats and "series" in stats and "labels" in stats:
-            # Find "Savings" series
-            for series in stats.get("series", []):
-                if series.get("name") == "Savings":
-                    # Last element in data array is the Total
-                    savings_data = series.get("data", [])
-                    if savings_data:
-                        return savings_data[-1]  # Total is last element
-
-        # Fall back to legacy shrinkage_groups
-        total = 0
-        for item in self.shrinkage_groups:
-            original = item.get("OriginalSize", 0)
-            final = item.get("FinalSize", 0)
-            if original > final:
-                total += (original - final)
-        return total
-
-    @property
-    def storage_saved_gb(self) -> float:
-        """Get total storage saved in GB."""
-        return round(self.storage_saved_bytes / (1024 ** 3), 2)
-
-    @property
-    def storage_saved_percent(self) -> float:
-        """Get storage saved percentage.
-
-        Uses /api/statistics/storage-saved if available,
-        falls back to shrinkage_groups calculation if not.
-        """
-        # Try new endpoint first
-        stats = self.storage_saved_stats
-        if stats and "series" in stats:
-            final_size = 0
-            savings = 0
-
-            for series in stats.get("series", []):
-                if series.get("name") == "Final Size":
-                    data = series.get("data", [])
-                    final_size = data[-1] if data else 0
-                elif series.get("name") == "Savings":
-                    data = series.get("data", [])
-                    savings = data[-1] if data else 0
-
-            if final_size > 0 and savings > 0:
-                total_original = final_size + savings
-                return round((savings / total_original) * 100, 1)
-
-        # Fall back to legacy calculation
-        total_original = 0
-        total_final = 0
-        for item in self.shrinkage_groups:
-            total_original += item.get("OriginalSize", 0)
-            total_final += item.get("FinalSize", 0)
-
-        if total_original > 0:
-            return round(((total_original - total_final) / total_original) * 100, 1)
-        return 0.0
-
-    @property
-    def storage_saved_by_library(self) -> list[dict[str, Any]]:
-        """Get storage savings broken down by library.
-
-        Returns: [
-            {
-                "library": "Library Name",
-                "items": 123,
-                "final_size_bytes": 4387058326945,
-                "savings_bytes": 1439824444369,
-                "increase_bytes": 0,
-                "savings_gb": 1340.56,
-            },
-            ...
-        ]
-        """
-        stats = self.storage_saved_stats
-        if not stats or "series" not in stats or "labels" not in stats:
-            # Fall back to legacy shrinkage_groups
-            return [
+    def _storage(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None] | None:
+        """Return per-library rows and the total row."""
+        if self.fenrus and isinstance(libraries := self.fenrus.get("Libraries"), list):
+            rows = [
                 {
-                    "library": s.get("Library", "Unknown"),
-                    "items": 0,  # Not available in legacy data
-                    "final_size_bytes": s.get("FinalSize", 0),
-                    "savings_bytes": s.get("OriginalSize", 0) - s.get("FinalSize", 0),
-                    "increase_bytes": 0,
-                    "savings_gb": round((s.get("OriginalSize", 0) - s.get("FinalSize", 0)) / (1024**3), 2),
+                    "library": lib.get("Library"),
+                    "items": lib.get("TotalFiles"),
+                    "final": lib.get("FinalSize") or 0,
+                    "saved": (lib.get("OriginalSize") or 0)
+                    - (lib.get("FinalSize") or 0),
                 }
-                for s in self.shrinkage_groups
+                for lib in libraries
+                if isinstance(lib, dict)
             ]
+            total = {
+                "final": sum(r["final"] for r in rows),
+                "saved": sum(r["saved"] for r in rows),
+            }
+            return rows, total
+        stats = self._get("storage_saved")
+        if not stats:
+            return None
+        series = {
+            s.get("name"): s.get("data") or []
+            for s in stats.get("series") or []
+            if isinstance(s, dict)
+        }
+        items = stats.get("items") or []
 
-        # Parse new endpoint data
-        labels = stats.get("labels", [])
-        items_counts = stats.get("items", [])
+        def at(values: list[Any], i: int) -> Any:
+            return (values[i] if i < len(values) else None) or 0
 
-        final_size_data = []
-        savings_data = []
-        increase_data = []
-
-        for series in stats.get("series", []):
-            name = series.get("name")
-            data = series.get("data", [])
-            if name == "Final Size":
-                final_size_data = data
-            elif name == "Savings":
-                savings_data = data
-            elif name == "Increase":
-                increase_data = data
-
-        # Combine into list of dicts (exclude "Total" - it's the last element)
-        result = []
-        for i, label in enumerate(labels[:-1]):  # Skip last "Total" label
-            result.append({
+        rows = [
+            {
                 "library": label,
-                "items": items_counts[i] if i < len(items_counts) else 0,
-                "final_size_bytes": final_size_data[i] if i < len(final_size_data) else 0,
-                "savings_bytes": savings_data[i] if i < len(savings_data) else 0,
-                "increase_bytes": increase_data[i] if i < len(increase_data) else 0,
-                "savings_gb": round((savings_data[i] if i < len(savings_data) else 0) / (1024**3), 2),
-            })
-
-        return result
-
-    # =========================================================================
-    # Task Properties
-    # =========================================================================
-    @property
-    def tasks(self) -> list[dict[str, Any]]:
-        """Get all scheduled tasks."""
-        return self.data.get("tasks", []) if self.data else []
+                "items": at(items, i),
+                "final": at(series.get("Final Size", []), i),
+                "saved": at(series.get("Savings", []), i),
+            }
+            for i, label in enumerate(stats.get("labels") or [])
+        ]
+        total = next((r for r in rows if r["library"] == "Total"), None)
+        return [r for r in rows if r is not total], total
 
     @property
-    def tasks_count(self) -> int:
-        """Get number of scheduled tasks."""
-        return len(self.tasks)
-
-    # =========================================================================
-    # Plugin Properties
-    # =========================================================================
-    @property
-    def plugins(self) -> list[dict[str, Any]]:
-        """Get all plugins."""
-        return self.data.get("plugins", []) if self.data else []
+    def storage_saved_bytes(self) -> int | None:
+        """Return the total bytes saved."""
+        storage = self._storage()
+        return storage[1]["saved"] if storage and storage[1] else None
 
     @property
-    def plugins_count(self) -> int:
-        """Get number of plugins."""
-        return len(self.plugins)
+    def storage_saved_gb(self) -> float | None:
+        """Return the total storage saved in GB."""
+        saved = self.storage_saved_bytes
+        return None if saved is None else round(saved / GIB, 2)
 
     @property
-    def enabled_plugins_count(self) -> int:
-        """Get number of enabled plugins."""
-        return len([p for p in self.plugins if p.get("Enabled", False)])
-
-    # =========================================================================
-    # NVIDIA Properties
-    # =========================================================================
-    @property
-    def nvidia_info(self) -> dict[str, Any]:
-        """Get NVIDIA SMI info."""
-        return self.data.get("nvidia", {}) if self.data else {}
+    def storage_saved_percent(self) -> float | None:
+        """Return the storage saved as a percentage of the original size."""
+        storage = self._storage()
+        if not storage or not storage[1]:
+            return None
+        original = storage[1]["final"] + storage[1]["saved"]
+        return round(storage[1]["saved"] / original * 100, 1) if original > 0 else None
 
     @property
-    def has_nvidia(self) -> bool:
-        """Check if NVIDIA GPU is available."""
-        return bool(self.nvidia_info)
+    def storage_saved_by_library(self) -> list[dict[str, Any]] | None:
+        """Return storage savings per library."""
+        storage = self._storage()
+        return storage[0] if storage else None
+
+    # NVIDIA
 
     @property
-    def nvidia_gpu_usage(self) -> float:
-        """Get NVIDIA GPU usage percentage."""
-        return self.nvidia_info.get("GpuUsage", 0.0)
+    def nvidia_info(self) -> dict[str, Any] | None:
+        """Return NVIDIA SMI data."""
+        return self._get("nvidia")
 
-    @property
-    def nvidia_memory_usage(self) -> float:
-        """Get NVIDIA memory usage percentage."""
-        return self.nvidia_info.get("MemoryUsage", 0.0)
 
-    @property
-    def nvidia_encoder_usage(self) -> float:
-        """Get NVIDIA encoder usage percentage."""
-        return self.nvidia_info.get("EncoderUsage", 0.0)
-
-    @property
-    def nvidia_decoder_usage(self) -> float:
-        """Get NVIDIA decoder usage percentage."""
-        return self.nvidia_info.get("DecoderUsage", 0.0)
-
-    @property
-    def nvidia_temperature(self) -> float:
-        """Get NVIDIA GPU temperature."""
-        return self.nvidia_info.get("Temperature", 0.0)
+def enabled_count(items: list[dict[str, Any]] | None) -> int | None:
+    """Return how many items are enabled."""
+    return None if items is None else sum(1 for i in items if i.get("Enabled"))

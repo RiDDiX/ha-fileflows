@@ -5,9 +5,6 @@
 credentials.json
 secrets.yaml
 
-# Test results with sensitive data
-api_test_results.json
-
 # Python
 __pycache__/
 *.py[cod]
@@ -20,6 +17,8 @@ dist/
 downloads/
 eggs/
 .eggs/
+.ruff_cache/
+.pytest_cache/
 lib/
 lib64/
 parts/

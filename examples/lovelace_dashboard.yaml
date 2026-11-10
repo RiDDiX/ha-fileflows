@@ -1,5 +1,6 @@
 # FileFlows Dashboard - Lovelace Example Configuration
 # Copy relevant sections to your dashboard configuration
+# Entity ids assume the host "nas" (device "FileFlows (nas)"); replace "nas" with your host slug.
 
 # ============================================
 # COMPLETE DASHBOARD VIEW
@@ -13,15 +14,15 @@ cards:
   - type: horizontal-stack
     cards:
       - type: entity
-        entity: binary_sensor.fileflows_processing_active
+        entity: binary_sensor.fileflows_nas_processing_active
         name: Processing
         icon: mdi:cog-sync
       - type: entity
-        entity: sensor.fileflows_active_runners
+        entity: sensor.fileflows_nas_active_workers
         name: Runners
         icon: mdi:run-fast
       - type: entity
-        entity: sensor.fileflows_unprocessed_files
+        entity: sensor.fileflows_nas_unprocessed_files
         name: Queue
         icon: mdi:inbox
 
@@ -30,28 +31,28 @@ cards:
     title: System Control
     show_header_toggle: false
     entities:
-      - entity: switch.fileflows_system_active
+      - entity: switch.fileflows_nas_system_active
         name: System Active
         secondary_info: last-changed
       - type: divider
-      - entity: button.fileflows_pause_system
+      - entity: button.fileflows_nas_pause_system
         name: Pause Processing
-      - entity: button.fileflows_resume_system
+      - entity: button.fileflows_nas_resume_system
         name: Resume Processing
-      - entity: button.fileflows_refresh_data
+      - entity: button.fileflows_nas_refresh_data
         name: Refresh Data
 
   # Current Processing Card
   - type: markdown
     title: Currently Processing
     content: |
-      {% set current = states('sensor.fileflows_current_processing_file') %}
-      {% set processing = state_attr('sensor.fileflows_processing_files', 'details') %}
-      {% if current != 'None' and processing %}
+      {% set processing = state_attr('sensor.fileflows_nas_current_file', 'details') %}
+      {% if processing %}
       {% for file in processing %}
-      **{{ file.name }}**
+      **{{ file.file }}**
+      - Library: {{ file.library }}
+      - Step: {{ file.step }}
       - Progress: {{ file.progress }}%
-      - Node: {{ file.node }}
       {% endfor %}
       {% else %}
       *No files currently processing*
@@ -63,22 +64,22 @@ cards:
     columns: 4
     show_state: true
     entities:
-      - entity: sensor.fileflows_unprocessed_files
+      - entity: sensor.fileflows_nas_unprocessed_files
         name: Queue
         icon: mdi:inbox-full
-      - entity: sensor.fileflows_processing_files
+      - entity: sensor.fileflows_nas_processing_files
         name: Processing
         icon: mdi:progress-clock
-      - entity: sensor.fileflows_processed_files
+      - entity: sensor.fileflows_nas_processed_files
         name: Done
         icon: mdi:check-circle
-      - entity: sensor.fileflows_failed_files
+      - entity: sensor.fileflows_nas_failed_files
         name: Failed
         icon: mdi:alert-circle
 
   # Storage Savings Gauge
   - type: gauge
-    entity: sensor.fileflows_storage_saved_percent
+    entity: sensor.fileflows_nas_storage_saved_percentage
     name: Storage Savings
     min: 0
     max: 100
@@ -99,10 +100,10 @@ cards:
   - type: entities
     title: Storage Statistics
     entities:
-      - entity: sensor.fileflows_storage_saved
+      - entity: sensor.fileflows_nas_storage_saved
         name: Total Saved
         icon: mdi:harddisk
-      - entity: sensor.fileflows_storage_saved_percent
+      - entity: sensor.fileflows_nas_storage_saved_percentage
         name: Savings Percentage
         icon: mdi:percent
 
@@ -111,14 +112,14 @@ cards:
     title: Processing Nodes
     show_header_toggle: false
     entities:
-      - entity: sensor.fileflows_nodes_count
+      - entity: sensor.fileflows_nas_processing_nodes
         name: Total Nodes
       - type: divider
       # Add your node switches here - they will be auto-created
       # Example:
-      # - entity: switch.fileflows_node_internal
+      # - entity: switch.fileflows_nas_node_internal
       #   name: Internal Node
-      # - entity: switch.fileflows_node_external
+      # - entity: switch.fileflows_nas_node_external
       #   name: External Node
 
   # Libraries Card
@@ -126,37 +127,39 @@ cards:
     title: Libraries
     show_header_toggle: false
     entities:
-      - entity: sensor.fileflows_libraries_count
+      - entity: sensor.fileflows_nas_libraries
         name: Total Libraries
       - type: divider
       # Add your library rescan buttons here - they will be auto-created
       # Example:
-      # - entity: button.fileflows_rescan_movies
+      # - entity: button.fileflows_nas_rescan_movies
       #   name: Rescan Movies
-      # - entity: button.fileflows_rescan_tv_shows
+      # - entity: button.fileflows_nas_rescan_tv_shows
       #   name: Rescan TV Shows
 
   # System Information Card
   - type: entities
     title: System Information
     entities:
-      - entity: sensor.fileflows_version
+      - entity: sensor.fileflows_nas_version
         name: Version
-      - entity: sensor.fileflows_flows_count
+      - entity: sensor.fileflows_nas_flows
         name: Flows
-      - entity: sensor.fileflows_total_runners
+      - type: attribute
+        entity: sensor.fileflows_nas_active_workers
+        attribute: total_runners
         name: Total Runners
 
   # Queue List Card (if you have many files)
   - type: markdown
     title: Queue Preview
     content: |
-      {% set files = state_attr('sensor.fileflows_unprocessed_files', 'files') %}
+      {% set files = state_attr('sensor.fileflows_nas_upcoming_files', 'files') %}
       {% if files %}
-      | # | File |
-      |---|------|
+      | # | File | Library |
+      |---|------|---------|
       {% for file in files[:5] %}
-      | {{ loop.index }} | {{ file[:40] }}{% if file|length > 40 %}...{% endif %} |
+      | {{ loop.index }} | {{ file.name[:40] }}{% if file.name|length > 40 %}...{% endif %} | {{ file.library }} |
       {% endfor %}
       {% if files|length > 5 %}
       
@@ -172,12 +175,12 @@ cards:
 # - type: custom:mushroom-chips-card
 #   chips:
 #     - type: entity
-#       entity: binary_sensor.fileflows_processing_active
+#       entity: binary_sensor.fileflows_nas_processing_active
 #       icon_color: green
 #     - type: entity
-#       entity: sensor.fileflows_unprocessed_files
+#       entity: sensor.fileflows_nas_unprocessed_files
 #     - type: entity
-#       entity: sensor.fileflows_storage_saved
+#       entity: sensor.fileflows_nas_storage_saved
 
 # ============================================
 # MINI GRAPH CARD (requires mini-graph-card from HACS)
@@ -185,7 +188,7 @@ cards:
 # - type: custom:mini-graph-card
 #   name: Storage Saved
 #   entities:
-#     - entity: sensor.fileflows_storage_saved
+#     - entity: sensor.fileflows_nas_storage_saved
 #       name: GB Saved
 #   hours_to_show: 168
 #   points_per_hour: 1
@@ -202,9 +205,9 @@ cards:
 #   title: Processing History
 #   hours_to_show: 24
 #   entities:
-#     - entity: sensor.fileflows_processing_files
+#     - entity: sensor.fileflows_nas_processing_files
 #       name: Processing
-#     - entity: sensor.fileflows_unprocessed_files
+#     - entity: sensor.fileflows_nas_unprocessed_files
 #       name: Queue
 
 # ============================================
@@ -212,11 +215,11 @@ cards:
 # ============================================
 # - type: conditional
 #   conditions:
-#     - entity: binary_sensor.fileflows_has_failed_files
+#     - entity: binary_sensor.fileflows_nas_has_failed_files
 #       state: 'on'
 #   card:
 #     type: markdown
 #     content: |
-#       ## ⚠️ Processing Failures
-#       **{{ states('sensor.fileflows_files_failed') }}** files have failed processing.
+#       ## Processing Failures
+#       **{{ states('sensor.fileflows_nas_failed_files') }}** files have failed processing.
 #       Check the FileFlows dashboard for details.

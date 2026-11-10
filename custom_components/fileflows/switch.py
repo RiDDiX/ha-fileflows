@@ -1,106 +1,114 @@
 """Switch platform for FileFlows."""
+
 from __future__ import annotations
 
-import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DEFAULT_PORT, DOMAIN
-from .coordinator import FileFlowsDataUpdateCoordinator
+from .api import FileFlowsApi
+from .coordinator import FileFlowsConfigEntry, FileFlowsDataUpdateCoordinator
+from .entity import FileFlowsEntity, add_item_entities
 
-_LOGGER = logging.getLogger(__name__)
+
+@dataclass(frozen=True, kw_only=True)
+class FileFlowsItemSwitchDescription(SwitchEntityDescription):
+    """Describes a switch that enables or disables a node, library or flow."""
+
+    kind: str
+    set_fn: Callable[[FileFlowsApi, str, bool], Awaitable[None]]
+    attr_fn: Callable[[dict[str, Any]], dict[str, Any]]
+
+
+ITEM_SWITCHES: tuple[FileFlowsItemSwitchDescription, ...] = (
+    FileFlowsItemSwitchDescription(
+        key="node",
+        translation_key="node",
+        icon="mdi:server",
+        kind="nodes",
+        set_fn=lambda api, uid, on: api.set_node_state(uid, on),
+        attr_fn=lambda item: {
+            "address": item.get("Address"),
+            "runners": item.get("FlowRunners"),
+            "priority": item.get("Priority"),
+        },
+    ),
+    FileFlowsItemSwitchDescription(
+        key="library",
+        translation_key="library",
+        icon="mdi:folder",
+        kind="libraries",
+        set_fn=lambda api, uid, on: api.set_library_state(uid, on),
+        attr_fn=lambda item: {
+            "path": item.get("Path"),
+            "priority": item.get("Priority"),
+        },
+    ),
+    FileFlowsItemSwitchDescription(
+        key="flow",
+        translation_key="flow",
+        icon="mdi:sitemap",
+        kind="flows",
+        set_fn=lambda api, uid, on: api.set_flow_state(uid, on),
+        attr_fn=lambda item: {"type": item.get("Type")},
+    ),
+)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: FileFlowsConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up FileFlows switches."""
-    coordinator: FileFlowsDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-
-    entities: list[SwitchEntity] = []
-
-    # System active switch (pause/resume)
-    entities.append(FileFlowsSystemSwitch(coordinator, entry))
-
-    # Per-node switches
-    for node in coordinator.nodes:
-        node_uid = node.get("Uid", "")
-        node_name = node.get("Name", "Unknown")
-        if node_uid:
-            entities.append(
-                FileFlowsNodeSwitch(coordinator, entry, node_uid, node_name)
-            )
-
-    # Per-library switches
-    for library in coordinator.libraries:
-        lib_uid = library.get("Uid", "")
-        lib_name = library.get("Name", "Unknown")
-        if lib_uid:
-            entities.append(
-                FileFlowsLibrarySwitch(coordinator, entry, lib_uid, lib_name)
-            )
-
-    # Per-flow switches
-    for flow in coordinator.flows:
-        flow_uid = flow.get("Uid", "")
-        flow_name = flow.get("Name", "Unknown")
-        if flow_uid:
-            entities.append(
-                FileFlowsFlowSwitch(coordinator, entry, flow_uid, flow_name)
-            )
-
-    async_add_entities(entities)
-
-
-class FileFlowsSystemSwitch(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], SwitchEntity
-):
-    """Switch to pause/resume FileFlows processing."""
-
-    _attr_has_entity_name = True
-    _attr_name = "System Active"
-    _attr_icon = "mdi:power"
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the switch."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_system_active"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
+    coordinator = entry.runtime_data
+    if not coordinator.api.has_api:
+        return
+    async_add_entities([FileFlowsSystemSwitch(coordinator)])
+    for description in ITEM_SWITCHES:
+        add_item_entities(
+            coordinator,
+            entry,
+            async_add_entities,
+            description.kind,
+            lambda uid, item, d=description: [
+                FileFlowsItemSwitch(coordinator, d, uid, item)
+            ],
         )
 
+
+class FileFlowsSystemSwitch(FileFlowsEntity, SwitchEntity):
+    """Switch to pause/resume FileFlows processing."""
+
+    _attr_translation_key = "system_active"
+    _attr_icon = "mdi:power"
+
+    def __init__(self, coordinator: FileFlowsDataUpdateCoordinator) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator, "system_active")
+
     @property
-    def is_on(self) -> bool:
-        """Return true if system is active (not paused)."""
-        return not self.coordinator.is_paused
+    def available(self) -> bool:
+        """Return False when the pause state is unknown."""
+        return super().available and self.coordinator.is_paused is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the system is active (not paused)."""
+        paused = self.coordinator.is_paused
+        return None if paused is None else not paused
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Resume the system."""
-        await self.coordinator.api.resume_system()
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_action(self.coordinator.api.resume_system())
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Pause the system."""
-        await self.coordinator.api.pause_system()
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_action(self.coordinator.api.pause_system())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -111,184 +119,42 @@ class FileFlowsSystemSwitch(
         }
 
 
-class FileFlowsNodeSwitch(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], SwitchEntity
-):
-    """Switch to enable/disable a processing node."""
+class FileFlowsItemSwitch(FileFlowsEntity, SwitchEntity):
+    """Switch to enable or disable a node, library or flow."""
 
-    _attr_has_entity_name = True
+    entity_description: FileFlowsItemSwitchDescription
 
     def __init__(
         self,
         coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-        node_uid: str,
-        node_name: str,
+        description: FileFlowsItemSwitchDescription,
+        uid: str,
+        item: dict[str, Any],
     ) -> None:
         """Initialize the switch."""
-        super().__init__(coordinator)
-        self._node_uid = node_uid
-        self._node_name = node_name
-        self._attr_unique_id = f"{entry.entry_id}_node_{node_uid}"
-        self._attr_name = f"Node {node_name}"
-        self._attr_icon = "mdi:server"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
+        super().__init__(coordinator, f"{description.key}_{uid}", description.kind, uid)
+        self.entity_description = description
+        self._attr_translation_placeholders = {"name": item.get("Name", "Unknown")}
 
     @property
-    def is_on(self) -> bool:
-        """Return true if the node is enabled."""
-        for node in self.coordinator.nodes:
-            if node.get("Uid") == self._node_uid:
-                return node.get("Enabled", False)
-        return False
+    def is_on(self) -> bool | None:
+        """Return true if the item is enabled."""
+        return self.item.get("Enabled") if self.item else None
+
+    async def _set(self, enabled: bool) -> None:
+        await self.coordinator.async_action(
+            self.entity_description.set_fn(self.coordinator.api, self._uid, enabled)
+        )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable the node."""
-        await self.coordinator.api.enable_node(self._node_uid)
-        await self.coordinator.async_request_refresh()
+        """Enable the item."""
+        await self._set(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable the node."""
-        await self.coordinator.api.disable_node(self._node_uid)
-        await self.coordinator.async_request_refresh()
+        """Disable the item."""
+        await self._set(False)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        for node in self.coordinator.nodes:
-            if node.get("Uid") == self._node_uid:
-                return {
-                    "uid": self._node_uid,
-                    "address": node.get("Address", "Unknown"),
-                    "runners": node.get("FlowRunners", 0),
-                    "priority": node.get("Priority", 0),
-                }
-        return {"uid": self._node_uid}
-
-
-class FileFlowsLibrarySwitch(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], SwitchEntity
-):
-    """Switch to enable/disable a library."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-        lib_uid: str,
-        lib_name: str,
-    ) -> None:
-        """Initialize the switch."""
-        super().__init__(coordinator)
-        self._lib_uid = lib_uid
-        self._lib_name = lib_name
-        self._attr_unique_id = f"{entry.entry_id}_library_{lib_uid}"
-        self._attr_name = f"Library {lib_name}"
-        self._attr_icon = "mdi:folder"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
-
-    @property
-    def is_on(self) -> bool:
-        """Return true if the library is enabled."""
-        for lib in self.coordinator.libraries:
-            if lib.get("Uid") == self._lib_uid:
-                return lib.get("Enabled", False)
-        return False
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable the library."""
-        await self.coordinator.api.enable_library(self._lib_uid)
-        await self.coordinator.async_request_refresh()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable the library."""
-        await self.coordinator.api.disable_library(self._lib_uid)
-        await self.coordinator.async_request_refresh()
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        for lib in self.coordinator.libraries:
-            if lib.get("Uid") == self._lib_uid:
-                return {
-                    "uid": self._lib_uid,
-                    "path": lib.get("Path", "Unknown"),
-                    "priority": lib.get("Priority", 0),
-                }
-        return {"uid": self._lib_uid}
-
-
-class FileFlowsFlowSwitch(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], SwitchEntity
-):
-    """Switch to enable/disable a flow."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-        flow_uid: str,
-        flow_name: str,
-    ) -> None:
-        """Initialize the switch."""
-        super().__init__(coordinator)
-        self._flow_uid = flow_uid
-        self._flow_name = flow_name
-        self._attr_unique_id = f"{entry.entry_id}_flow_{flow_uid}"
-        self._attr_name = f"Flow {flow_name}"
-        self._attr_icon = "mdi:sitemap"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
-
-    @property
-    def is_on(self) -> bool:
-        """Return true if the flow is enabled."""
-        for flow in self.coordinator.flows:
-            if flow.get("Uid") == self._flow_uid:
-                return flow.get("Enabled", False)
-        return False
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable the flow."""
-        await self.coordinator.api.enable_flow(self._flow_uid)
-        await self.coordinator.async_request_refresh()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable the flow."""
-        await self.coordinator.api.disable_flow(self._flow_uid)
-        await self.coordinator.async_request_refresh()
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        for flow in self.coordinator.flows:
-            if flow.get("Uid") == self._flow_uid:
-                return {
-                    "uid": self._flow_uid,
-                    "type": flow.get("Type", "Unknown"),
-                }
-        return {"uid": self._flow_uid}
+        return {"uid": self._uid, **self.entity_description.attr_fn(self.item or {})}

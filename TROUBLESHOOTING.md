@@ -1,352 +1,73 @@
-# FileFlows Integration - Troubleshooting Guide
+# Troubleshooting
 
-## Fehler: "cannot_connect"
-
-### Symptom
-Bei der Konfiguration der Integration erscheint der Fehler: `cannot_connect`
-
-### Mögliche Ursachen & Lösungen
-
-#### 1. FileFlows Server ist nicht erreichbar
-
-**Prüfen:**
-```bash
-# Test 1: Ping zum Server
-ping YOUR_FILEFLOWS_IP
-
-# Test 2: Port-Check
-curl http://YOUR_FILEFLOWS_IP:YOUR_PORT/remote/info/version
-
-# Test 3: Status-Endpoint
-curl http://YOUR_FILEFLOWS_IP:YOUR_PORT/remote/info/status
-```
-
-**Lösung:**
-- Stellen Sie sicher, dass FileFlows läuft
-- Prüfen Sie Firewall-Regeln
-- Verif icieren Sie IP-Adresse und Port
-
-#### 2. Falscher Port konfiguriert
-
-**Standard-Ports:**
-- Häufigster Port: `8585`
-- Alternativer Port: `19200`
-
-**Prüfen:**
-```bash
-# In FileFlows Web UI nachsehen unter Settings → General
-# Oder in der FileFlows Konfigurationsdatei
-```
-
-**Lösung:**
-- Verwenden Sie den korrekten Port in der Home Assistant Konfiguration
-
-#### 3. SSL/HTTPS Fehlkonfiguration
-
-**Symptom:** FileFlows läuft auf HTTP, aber SSL ist auf `true` gesetzt
-
-**Lösung:**
-```yaml
-# Für HTTP (Standard):
-SSL: false
-Verify SSL: true  # Kann auf false, hat keine Auswirkung bei HTTP
-
-# Für HTTPS:
-SSL: true
-Verify SSL: true  # Nur auf false setzen bei selbst-signierten Zertifikaten
-```
-
-#### 4. Username/Password sind leer oder enthalten Leerzeichen
-
-**Problem:** Home Assistant trimmt manchmal Leerzeichen nicht korrekt
-
-**Lösung:**
-1. Öffnen Sie Home Assistant → Einstellungen → Geräte & Dienste → FileFlows
-2. Löschen Sie die Integration komplett
-3. Fügen Sie sie neu hinzu
-4. Geben Sie Username/Password **ohne** führende/trailing Leerzeichen ein
-
-## Fehler: "invalid_auth"
-
-### Symptom
-Verbindung funktioniert, aber Authentifizierung schlägt fehl
-
-### Lösungen
-
-#### 1. Falsche Credentials
-
-**Testen Sie den Login manuell:**
-```bash
-# Holen Sie einen Bearer Token
-TOKEN=$(curl -sS \
-  -H "Content-Type: application/json" \
-  -d '{"username":"YOUR_USERNAME","password":"YOUR_PASSWORD"}' \
-  "http://YOUR_FILEFLOWS_IP:YOUR_PORT/authorize")
-
-echo "Token: $TOKEN"
-
-# Wenn Sie einen Token erhalten (langer String), sind die Credentials korrekt
-# Bei Fehler 401: Credentials sind falsch
-```
-
-**Lösung:**
-- Loggen Sie sich in die FileFlows Web UI ein
-- Verwenden Sie **exakt** dieselben Credentials
-- Achten Sie auf Groß-/Kleinschreibung
-
-#### 2. FileFlows Security ist deaktiviert
-
-**Symptom:** FileFlows benötigt keine Anmeldung in der Web UI
-
-**Lösung:**
-- Lassen Sie Username/Password in Home Assistant **leer**
-- Die Integration funktioniert dann nur mit öffentlichen Endpoints
-- Für vollständige Funktionalität: Aktivieren Sie Security in FileFlows
-
-## Debug-Modus aktivieren
-
-Um detaillierte Fehler zu sehen, fügen Sie zu `configuration.yaml` hinzu:
+## Turn on debug logging first
 
 ```yaml
 logger:
-  default: info
   logs:
     custom_components.fileflows: debug
-    custom_components.fileflows.api: debug
-    custom_components.fileflows.config_flow: debug
-    custom_components.fileflows.coordinator: debug
 ```
 
-Dann:
-1. Home Assistant neu starten
-2. Integration erneut hinzufügen
-3. Logs prüfen: **Einstellungen** → **System** → **Protokolle**
+Restart Home Assistant, reproduce the problem and check **Settings > System > Logs**. Failed requests are logged with method and path, for example `GET /api/status: not found`.
 
-## Test-Scripts verwenden
+## Setup errors
 
-### 1. Login-Test
+### "The endpoint is disabled" (`api_disabled`)
 
-```bash
-cd /Users/maximilianhammerschmid/ha-fileflows
+FileFlows answered 404 on the endpoint used to check the token.
 
-# Script bearbeiten
-nano test_login.py
-# Setzen Sie: API_BASE, USERNAME, PASSWORD
+- With an API token: the API is not enabled or there is no licence. In FileFlows open **Config > API** and enable it. This needs a FileFlows licence and FileFlows 26.10 or newer.
+- With only the Fenrus token: the Fenrus endpoint is off. Turn on **Config > Admin > General > Fenrus Dashboard Endpoint**.
 
-# Ausführen
-python3 test_login.py
-```
+If you have no licence, leave the API token empty and use the Fenrus token. You get counts, storage saved and update status, but no switches and no buttons except Refresh Data.
 
-**Was der Test zeigt:**
-- ✅ Login erfolgreich → Credentials sind korrekt
-- ❌ 401 Error → Falsche Credentials
-- ❌ Connection Error → FileFlows nicht erreichbar
+### "FileFlows rejected the token" (`invalid_auth`)
 
-### 2. Vollständiger Diagnose-Test
+The token is wrong or was regenerated in FileFlows. Copy it again from **Config > API** (or the Fenrus setting) and paste it without anything around it. Leading and trailing spaces are stripped.
 
-```bash
-# Script bearbeiten
-nano test_fileflows_diagnostics.py
-# Setzen Sie: API_BASE
+If this happens while the integration is already running, Home Assistant shows a re-authentication prompt for the entry. Enter the new token there; you do not need to remove the integration.
 
-# Ausführen
-python3 test_fileflows_diagnostics.py
-```
+### "Failed to connect to FileFlows" (`cannot_connect`)
 
-**Was der Test zeigt:**
-- Welche Endpoints funktionieren
-- Ob Authentifizierung benötigt wird
-- Welche Daten verfügbar sind
+- Host is the plain IP or hostname, no `http://` and no path.
+- Port matches the FileFlows web UI (default 8585).
+- **Use SSL** matches how FileFlows is served. For self-signed certificates turn off **Verify SSL Certificate**.
+- Home Assistant can reach the server. If both run in Docker, check that they share a network or use the host IP.
+- A reverse proxy in front of FileFlows must pass the `X-Timestamp`, `X-Nonce`, `X-Signature` and `X-Webhook-Token` headers through unchanged.
+- If the log mentions `timestamp` or `nonce`, it is a clock problem, see below.
 
-## Häufige Konfigurationsfehler
+### "Enter an API token, a Fenrus webhook token, or both" (`no_token`)
 
-### ❌ Falsch: Port als String
-```yaml
-Port: "8585"  # FALSCH!
-```
+Both token fields were empty. At least one is required.
 
-### ✅ Richtig: Port als Zahl
-```yaml
-Port: 8585  # RICHTIG
-```
+## Clock skew
 
-### ❌ Falsch: IP mit Protokoll
-```yaml
-Host: "http://192.168.1.100"  # FALSCH!
-```
+Requests with the API token are signed with the current time. FileFlows rejects them when the clocks of Home Assistant and the FileFlows server are more than 5 minutes apart. The server answers 401 with a reason that mentions `timestamp` or `nonce`. In the setup or reconfigure form this shows as "Failed to connect". On a running entry the update fails, the entities go unavailable and the log shows the server's reason. Home Assistant does not ask you to re-authenticate, because the token itself is fine.
 
-### ✅ Richtig: Nur IP/Hostname
-```yaml
-Host: "192.168.1.100"  # RICHTIG
-```
+Make sure both machines sync time via NTP. For Docker, check the time inside the FileFlows container, not just on the host. The Fenrus token is not affected.
 
-### ❌ Falsch: Leerzeichen in Credentials
-```yaml
-Username: " admin "  # FALSCH! (Leerzeichen)
-Password: "  pass  "  # FALSCH! (Leerzeichen)
-```
+## Entities are unavailable
 
-### ✅ Richtig: Keine Leerzeichen
-```yaml
-Username: "admin"  # RICHTIG
-Password: "pass"  # RICHTIG
-```
+Sensors show unavailable, not 0, when there is no value.
 
-## Netzwerk-Troubleshooting
+- **All entities unavailable**: the server cannot be reached or a poll failed. The log has the reason. The integration retries on every update interval.
+- **Only some entities unavailable**:
+  - With only the Fenrus token, everything that needs the API token stays unavailable (version, current file, workers, nodes, libraries, flows, plugins, tasks, upcoming/recently finished, system paused). The README marks these with **A**.
+  - **Update Available** only comes from the Fenrus endpoint. Add the Fenrus token if you want it.
+  - Endpoints that fail with an API error (404, HTML instead of JSON, 5xx) are skipped, and their entities stay unavailable. Debug logging shows `Optional endpoint <name> unavailable: <reason>` for each one.
+- **NVIDIA sensors missing**: they are only created when FileFlows reports a GPU when the integration starts. Reload the integration after adding a GPU.
+- **A node, library, flow or task entity is unavailable**: it was removed in FileFlows. Delete the entity in Home Assistant if you do not need it any more.
 
-### FileFlows läuft in Docker
+## Check which routes your server offers
 
-**Problem:** Home Assistant kann FileFlows nicht erreichen
+Open `http://<host>:8585/api/help` (or `https://...`) in a browser. It lists the API routes of your FileFlows version. If a route from the debug log is missing there, your FileFlows version does not provide it and the matching entity stays unavailable. Updating FileFlows usually fixes this.
 
-**Lösung:**
-```bash
-# Prüfen Sie das Docker-Netzwerk
-docker network ls
-docker inspect <fileflows_container_name>
+## Automations stopped working after the update
 
-# Verwenden Sie die interne Docker-IP ODER
-# Verbinden Sie beide Container im selben Netzwerk
-```
+`binary_sensor.<...>_system_paused` used to be inverted. It is now on when the system is paused. Check automations and cards that use it.
 
-**Für Home Assistant Container:**
-```yaml
-# docker-compose.yml
-services:
-  homeassistant:
-    networks:
-      - fileflows_network
+## Reporting an issue
 
-  fileflows:
-    networks:
-      - fileflows_network
+https://github.com/RiDDiX/ha-fileflows/issues
 
-networks:
-  fileflows_network:
-```
-
-### FileFlows hinter Reverse Proxy
-
-**Problem:** Reverse Proxy blockiert `/api/*` Endpoints
-
-**Lösung - Nginx Beispiel:**
-```nginx
-location /api/ {
-    proxy_pass http://fileflows:8585;
-    proxy_set_header Authorization $http_authorization;
-    proxy_pass_header Authorization;
-}
-
-location /authorize {
-    proxy_pass http://fileflows:8585;
-    proxy_set_header Content-Type application/json;
-}
-```
-
-## Sensor-Werte sind alle 0 oder "unknown"
-
-### Symptom
-Integration ist verbunden, aber alle Sensoren zeigen keine Daten
-
-### Ursache
-Nur öffentliche Endpoints funktionieren, authentifizierte Endpoints schlagen fehl
-
-### Lösung
-
-**Option 1: Credentials konfigurieren**
-1. Fügen Sie Username/Password in der Integration hinzu
-2. Integration neu laden
-
-**Option 2: Öffentliche Endpoints reichen aus**
-Folgende Sensoren funktionieren ohne Auth:
-- Version
-- Queue Size
-- Processing Files
-- Processed Files
-- Storage Saved
-
-Diese benötigen Authentifizierung:
-- CPU/Memory Usage
-- Nodes, Libraries, Flows, Plugins
-- Detailed File Status
-- Tasks
-
-## Logs analysieren
-
-### Wichtige Log-Meldungen
-
-#### ✅ Erfolgreiche Verbindung
-```
-INFO: Testing basic connection...
-DEBUG: Basic connection successful
-INFO: Bearer token acquired successfully
-INFO: Bearer token authentication successful (token length: 256)
-```
-
-#### ❌ Verbindungsfehler
-```
-ERROR: Connection error: Cannot connect to host
-```
-→ FileFlows nicht erreichbar, IP/Port prüfen
-
-#### ❌ Authentifizierungsfehler
-```
-ERROR: Login failed: HTTP 401
-ERROR: Bearer authentication failed: Login failed - invalid username or password
-```
-→ Falsche Credentials, in FileFlows Web UI testen
-
-#### ❌ Token-Problem
-```
-ERROR: Failed to obtain Bearer token - no token returned
-```
-→ FileFlows /authorize Endpoint hat keinen Token zurückgegeben
-
-## Support
-
-Wenn Sie weiterhin Probleme haben:
-
-1. **Logs sammeln:**
-   - Debug-Modus aktivieren (siehe oben)
-   - Integration neu hinzufügen
-   - Relevante Log-Zeilen kopieren
-
-2. **Test-Results sammeln:**
-   ```bash
-   python3 test_login.py > login_test.txt 2>&1
-   python3 test_fileflows_diagnostics.py > diagnostics.txt 2>&1
-   ```
-
-3. **Issue erstellen:**
-   - GitHub: https://github.com/RiDDiX/ha-fileflows/issues
-   - Fügen Sie hinzu:
-     - Home Assistant Version
-     - FileFlows Version
-     - Log-Auszüge (ohne Credentials!)
-     - Test-Results
-
-## Schnell-Check
-
-Führen Sie diese Befehle aus:
-
-```bash
-# 1. Basis-Verbindung (sollte funktionieren)
-curl http://YOUR_IP:YOUR_PORT/remote/info/version
-
-# 2. Auth-Test (sollte 401 zurückgeben ohne Credentials)
-curl http://YOUR_IP:YOUR_PORT/api/status
-
-# 3. Login-Test
-curl -X POST http://YOUR_IP:YOUR_PORT/authorize \
-  -H "Content-Type: application/json" \
-  -d '{"username":"YOUR_USERNAME","password":"YOUR_PASSWORD"}'
-
-# 4. Token-Test (mit Token aus Schritt 3)
-curl http://YOUR_IP:YOUR_PORT/api/status \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**Erwartetes Ergebnis:**
-1. ✅ Version-String (z.B. "25.12.9.6135")
-2. ❌ 401 Unauthorized (wenn Auth aktiviert)
-3. ✅ Langer Token-String
-4. ✅ JSON mit Status-Daten
+Include the Home Assistant version, the FileFlows version, which token(s) you use and the debug log. Remove tokens from anything you paste.

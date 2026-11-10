@@ -6,21 +6,30 @@ on:
       - 'v*'
 
 permissions:
-  contents: write  # <-- Das fehlt!
+  contents: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Check tag matches manifest version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(jq -r .version custom_components/fileflows/manifest.json)"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $tag does not match manifest version $version"
+            exit 1
+          fi
+
       - name: Create ZIP
         run: |
           cd custom_components
           zip -r ../fileflows.zip fileflows/
-          
+
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: fileflows.zip
           generate_release_notes: true

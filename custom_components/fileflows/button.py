@@ -1,294 +1,167 @@
 """Button platform for FileFlows."""
+
 from __future__ import annotations
 
-import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.button import ButtonEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DEFAULT_PORT, DOMAIN
-from .coordinator import FileFlowsDataUpdateCoordinator
+from .api import FileFlowsApi
+from .coordinator import FileFlowsConfigEntry, FileFlowsDataUpdateCoordinator
+from .entity import FileFlowsEntity, add_item_entities
 
-_LOGGER = logging.getLogger(__name__)
+
+@dataclass(frozen=True, kw_only=True)
+class FileFlowsButtonDescription(ButtonEntityDescription):
+    """Describes a FileFlows button."""
+
+    press_fn: Callable[[FileFlowsApi], Awaitable[None]] | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class FileFlowsItemButtonDescription(ButtonEntityDescription):
+    """Describes a button that acts on one library or task."""
+
+    kind: str
+    attr_name: str
+    press_fn: Callable[[FileFlowsApi, str], Awaitable[None]]
+
+
+BUTTONS: tuple[FileFlowsButtonDescription, ...] = (
+    FileFlowsButtonDescription(
+        key="pause",
+        translation_key="pause",
+        icon="mdi:pause",
+        press_fn=lambda api: api.pause_system(),
+    ),
+    FileFlowsButtonDescription(
+        key="resume",
+        translation_key="resume",
+        icon="mdi:play",
+        press_fn=lambda api: api.resume_system(),
+    ),
+    FileFlowsButtonDescription(
+        key="restart",
+        translation_key="restart",
+        icon="mdi:restart",
+        entity_category=EntityCategory.CONFIG,
+        entity_registry_enabled_default=False,
+        press_fn=lambda api: api.restart_system(),
+    ),
+    FileFlowsButtonDescription(
+        key="rescan_all",
+        translation_key="rescan_all",
+        icon="mdi:folder-refresh",
+        press_fn=lambda api: api.rescan_libraries(),
+    ),
+    FileFlowsButtonDescription(
+        key="refresh",
+        translation_key="refresh",
+        icon="mdi:refresh",
+        press_fn=None,
+    ),
+)
+
+ITEM_BUTTONS: tuple[FileFlowsItemButtonDescription, ...] = (
+    FileFlowsItemButtonDescription(
+        key="rescan",
+        translation_key="library_rescan",
+        icon="mdi:folder-refresh-outline",
+        kind="libraries",
+        attr_name="library",
+        press_fn=lambda api, uid: api.rescan_libraries([uid]),
+    ),
+    FileFlowsItemButtonDescription(
+        key="task",
+        translation_key="task_run",
+        icon="mdi:play-circle",
+        kind="tasks",
+        attr_name="task",
+        press_fn=lambda api, uid: api.run_task(uid),
+    ),
+)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: FileFlowsConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up FileFlows buttons."""
-    coordinator: FileFlowsDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-
-    entities: list[ButtonEntity] = [
-        FileFlowsPauseButton(coordinator, entry),
-        FileFlowsResumeButton(coordinator, entry),
-        FileFlowsRestartButton(coordinator, entry),
-        FileFlowsRescanAllButton(coordinator, entry),
-        FileFlowsRefreshButton(coordinator, entry),
-    ]
-
-    # Per-library rescan buttons
-    for library in coordinator.libraries:
-        lib_uid = library.get("Uid", "")
-        lib_name = library.get("Name", "Unknown")
-        if lib_uid:
-            entities.append(
-                FileFlowsLibraryRescanButton(coordinator, entry, lib_uid, lib_name)
-            )
-
-    # Per-task run buttons
-    for task in coordinator.tasks:
-        task_uid = task.get("Uid", "")
-        task_name = task.get("Name", "Unknown")
-        if task_uid:
-            entities.append(
-                FileFlowsTaskRunButton(coordinator, entry, task_uid, task_name)
-            )
-
-    async_add_entities(entities)
+    coordinator = entry.runtime_data
+    if not coordinator.api.has_api:
+        # every write needs the REST API; only the refresh button works without it
+        async_add_entities(
+            FileFlowsButton(coordinator, d) for d in BUTTONS if d.press_fn is None
+        )
+        return
+    async_add_entities(FileFlowsButton(coordinator, d) for d in BUTTONS)
+    for description in ITEM_BUTTONS:
+        add_item_entities(
+            coordinator,
+            entry,
+            async_add_entities,
+            description.kind,
+            lambda uid, item, d=description: [
+                FileFlowsItemButton(coordinator, d, uid, item)
+            ],
+        )
 
 
-class FileFlowsPauseButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to pause FileFlows."""
+class FileFlowsButton(FileFlowsEntity, ButtonEntity):
+    """FileFlows system button."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Pause System"
-    _attr_icon = "mdi:pause"
+    entity_description: FileFlowsButtonDescription
 
     def __init__(
         self,
         coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
+        description: FileFlowsButtonDescription,
     ) -> None:
         """Initialize the button."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_pause"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
+        super().__init__(coordinator, description.key)
+        self.entity_description = description
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        await self.coordinator.api.pause_system()
-        await self.coordinator.async_request_refresh()
+        if self.entity_description.press_fn is None:
+            await self.coordinator.async_request_refresh()
+            return
+        await self.coordinator.async_action(
+            self.entity_description.press_fn(self.coordinator.api)
+        )
 
 
-class FileFlowsResumeButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to resume FileFlows."""
+class FileFlowsItemButton(FileFlowsEntity, ButtonEntity):
+    """Button acting on one library or task."""
 
-    _attr_has_entity_name = True
-    _attr_name = "Resume System"
-    _attr_icon = "mdi:play"
+    entity_description: FileFlowsItemButtonDescription
 
     def __init__(
         self,
         coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
+        description: FileFlowsItemButtonDescription,
+        uid: str,
+        item: dict[str, Any],
     ) -> None:
         """Initialize the button."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_resume"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
+        super().__init__(coordinator, f"{description.key}_{uid}", description.kind, uid)
+        self.entity_description = description
+        self._name = item.get("Name", "Unknown")
+        self._attr_translation_placeholders = {"name": self._name}
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        await self.coordinator.api.resume_system()
-        await self.coordinator.async_request_refresh()
-
-
-class FileFlowsRestartButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to restart FileFlows server."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Restart Server"
-    _attr_icon = "mdi:restart"
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_restart"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
+        await self.coordinator.async_action(
+            self.entity_description.press_fn(self.coordinator.api, self._uid)
         )
-
-    async def async_press(self) -> None:
-        """Handle the button press."""
-        await self.coordinator.api.restart_system()
-
-
-class FileFlowsRescanAllButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to rescan all libraries."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Rescan All Libraries"
-    _attr_icon = "mdi:folder-refresh"
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_rescan_all"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
-
-    async def async_press(self) -> None:
-        """Handle the button press."""
-        await self.coordinator.api.rescan_all_libraries()
-        await self.coordinator.async_request_refresh()
-
-
-class FileFlowsRefreshButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to refresh data."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Refresh Data"
-    _attr_icon = "mdi:refresh"
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry.entry_id}_refresh"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
-
-    async def async_press(self) -> None:
-        """Handle the button press."""
-        await self.coordinator.async_request_refresh()
-
-
-class FileFlowsLibraryRescanButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to rescan a specific library."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-        lib_uid: str,
-        lib_name: str,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self._lib_uid = lib_uid
-        self._lib_name = lib_name
-        self._attr_unique_id = f"{entry.entry_id}_rescan_{lib_uid}"
-        self._attr_name = f"Rescan {lib_name}"
-        self._attr_icon = "mdi:folder-refresh-outline"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
-
-    async def async_press(self) -> None:
-        """Handle the button press."""
-        await self.coordinator.api.rescan_libraries([self._lib_uid])
-        await self.coordinator.async_request_refresh()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        return {"uid": self._lib_uid, "library": self._lib_name}
-
-
-class FileFlowsTaskRunButton(
-    CoordinatorEntity[FileFlowsDataUpdateCoordinator], ButtonEntity
-):
-    """Button to run a scheduled task."""
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: FileFlowsDataUpdateCoordinator,
-        entry: ConfigEntry,
-        task_uid: str,
-        task_name: str,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self._task_uid = task_uid
-        self._task_name = task_name
-        self._attr_unique_id = f"{entry.entry_id}_task_{task_uid}"
-        self._attr_name = f"Run Task {task_name}"
-        self._attr_icon = "mdi:play-circle"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"FileFlows ({entry.data.get(CONF_HOST)})",
-            manufacturer="FileFlows",
-            model="Media Processing Server",
-            sw_version=coordinator.version,
-            configuration_url=f"http://{entry.data.get(CONF_HOST)}:{entry.data.get(CONF_PORT, DEFAULT_PORT)}",
-        )
-
-    async def async_press(self) -> None:
-        """Handle the button press."""
-        await self.coordinator.api.run_task(self._task_uid)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        return {"uid": self._task_uid, "task": self._task_name}
+        return {"uid": self._uid, self.entity_description.attr_name: self._name}

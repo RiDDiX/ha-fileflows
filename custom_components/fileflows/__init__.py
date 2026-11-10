@@ -1,29 +1,32 @@
 """The FileFlows integration."""
+
 from __future__ import annotations
 
-import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, Platform
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import ATTR_CONFIG_ENTRY_ID, CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 
-from .api import FileFlowsApi, FileFlowsApiError
+from .api import FileFlowsApi
 from .const import (
     ATTR_FILE_UID,
     ATTR_FLOW_UID,
     ATTR_LIBRARY_UID,
+    ATTR_MINUTES,
     ATTR_NODE_UID,
     ATTR_TASK_UID,
     ATTR_WORKER_UID,
-    CONF_PASSWORD,
-    CONF_PORT,
+    CONF_API_TOKEN,
+    CONF_FENRUS_TOKEN,
     CONF_SSL,
-    CONF_USERNAME,
     CONF_VERIFY_SSL,
     DEFAULT_PORT,
     DEFAULT_SSL,
@@ -46,9 +49,7 @@ from .const import (
     SERVICE_RUN_TASK,
     SERVICE_UNHOLD_FILES,
 )
-from .coordinator import FileFlowsDataUpdateCoordinator
-
-_LOGGER = logging.getLogger(__name__)
+from .coordinator import FileFlowsConfigEntry, FileFlowsDataUpdateCoordinator
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -57,330 +58,155 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
 ]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up FileFlows from a config entry."""
-    # Clean username/password - convert empty strings to None
-    username = entry.data.get(CONF_USERNAME, "").strip() if entry.data.get(CONF_USERNAME) else None
-    password = entry.data.get(CONF_PASSWORD, "").strip() if entry.data.get(CONF_PASSWORD) else None
+UID_LIST = vol.All(cv.ensure_list, vol.Length(min=1), [cv.string])
 
-    api = FileFlowsApi(
-        host=entry.data[CONF_HOST],
-        port=entry.data.get(CONF_PORT, DEFAULT_PORT),
-        ssl=entry.data.get(CONF_SSL, DEFAULT_SSL),
-        verify_ssl=entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        username=username,
-        password=password,
-    )
+ServiceFn = Callable[[FileFlowsApi, dict[str, Any]], Awaitable[None]]
 
-    try:
-        if not await api.test_connection():
-            raise ConfigEntryNotReady("Cannot connect to FileFlows")
-    except FileFlowsApiError as err:
-        raise ConfigEntryNotReady(f"Error connecting to FileFlows: {err}") from err
+SERVICES: dict[str, tuple[dict[Any, Any], ServiceFn]] = {
+    SERVICE_PAUSE_SYSTEM: (
+        {
+            vol.Optional(ATTR_MINUTES): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=525600)
+            )
+        },
+        lambda api, d: api.pause_system(d.get(ATTR_MINUTES)),
+    ),
+    SERVICE_RESUME_SYSTEM: ({}, lambda api, d: api.resume_system()),
+    SERVICE_RESTART_SYSTEM: ({}, lambda api, d: api.restart_system()),
+    SERVICE_ENABLE_NODE: (
+        {vol.Required(ATTR_NODE_UID): cv.string},
+        lambda api, d: api.set_node_state(d[ATTR_NODE_UID], True),
+    ),
+    SERVICE_DISABLE_NODE: (
+        {vol.Required(ATTR_NODE_UID): cv.string},
+        lambda api, d: api.set_node_state(d[ATTR_NODE_UID], False),
+    ),
+    SERVICE_ENABLE_LIBRARY: (
+        {vol.Required(ATTR_LIBRARY_UID): cv.string},
+        lambda api, d: api.set_library_state(d[ATTR_LIBRARY_UID], True),
+    ),
+    SERVICE_DISABLE_LIBRARY: (
+        {vol.Required(ATTR_LIBRARY_UID): cv.string},
+        lambda api, d: api.set_library_state(d[ATTR_LIBRARY_UID], False),
+    ),
+    SERVICE_RESCAN_LIBRARY: (
+        {vol.Required(ATTR_LIBRARY_UID): cv.string},
+        lambda api, d: api.rescan_libraries([d[ATTR_LIBRARY_UID]]),
+    ),
+    SERVICE_RESCAN_ALL_LIBRARIES: ({}, lambda api, d: api.rescan_libraries()),
+    SERVICE_ENABLE_FLOW: (
+        {vol.Required(ATTR_FLOW_UID): cv.string},
+        lambda api, d: api.set_flow_state(d[ATTR_FLOW_UID], True),
+    ),
+    SERVICE_DISABLE_FLOW: (
+        {vol.Required(ATTR_FLOW_UID): cv.string},
+        lambda api, d: api.set_flow_state(d[ATTR_FLOW_UID], False),
+    ),
+    SERVICE_REPROCESS_FILE: (
+        {vol.Required(ATTR_FILE_UID): cv.string},
+        lambda api, d: api.reprocess_files([d[ATTR_FILE_UID]]),
+    ),
+    SERVICE_FORCE_PROCESSING: (
+        {vol.Required(ATTR_FILE_UID): UID_LIST},
+        lambda api, d: api.force_processing(d[ATTR_FILE_UID]),
+    ),
+    SERVICE_UNHOLD_FILES: (
+        {vol.Required(ATTR_FILE_UID): UID_LIST},
+        lambda api, d: api.unhold_files(d[ATTR_FILE_UID]),
+    ),
+    SERVICE_ABORT_WORKER: (
+        {vol.Required(ATTR_WORKER_UID): cv.string},
+        lambda api, d: api.abort_worker(d[ATTR_WORKER_UID]),
+    ),
+    SERVICE_RUN_TASK: (
+        {vol.Required(ATTR_TASK_UID): cv.string},
+        lambda api, d: api.run_task(d[ATTR_TASK_UID]),
+    ),
+}
 
-    coordinator = FileFlowsDataUpdateCoordinator(hass, api)
-    await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the FileFlows services."""
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    async def handle(call: ServiceCall) -> None:
+        coordinator = _resolve_coordinator(hass, call)
+        await coordinator.async_action(
+            SERVICES[call.service][1](coordinator.api, call.data)
+        )
 
-    # Register services
-    await _async_register_services(hass)
-
+    for service, (fields, _) in SERVICES.items():
+        hass.services.async_register(
+            DOMAIN,
+            service,
+            handle,
+            schema=vol.Schema(
+                {vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string, **fields}
+            ),
+        )
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+def _resolve_coordinator(
+    hass: HomeAssistant, call: ServiceCall
+) -> FileFlowsDataUpdateCoordinator:
+    if entry_id := call.data.get(ATTR_CONFIG_ENTRY_ID):
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if (
+            entry is None
+            or entry.domain != DOMAIN
+            or entry.state is not ConfigEntryState.LOADED
+        ):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="entry_not_loaded",
+                translation_placeholders={"entry_id": entry_id},
+            )
+        return entry.runtime_data
+    entries = hass.config_entries.async_loaded_entries(DOMAIN)
+    if len(entries) != 1:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="entry_required"
+        )
+    return entries[0].runtime_data
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: FileFlowsConfigEntry) -> bool:
+    """Set up FileFlows from a config entry."""
+    data = entry.data
+    if not data.get(CONF_API_TOKEN) and not data.get(CONF_FENRUS_TOKEN):
+        raise ConfigEntryAuthFailed("API token required")
+    api = FileFlowsApi(
+        async_get_clientsession(
+            hass, verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+        ),
+        data[CONF_HOST],
+        data.get(CONF_PORT, DEFAULT_PORT),
+        data.get(CONF_SSL, DEFAULT_SSL),
+        data.get(CONF_API_TOKEN),
+        data.get(CONF_FENRUS_TOKEN),
+    )
+    coordinator = FileFlowsDataUpdateCoordinator(hass, entry, api)
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: FileFlowsConfigEntry) -> bool:
     """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        coordinator: FileFlowsDataUpdateCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await coordinator.api.close()
-
-    # Remove services if no more entries
-    if not hass.data[DOMAIN]:
-        for service in [
-            SERVICE_PAUSE_SYSTEM,
-            SERVICE_RESUME_SYSTEM,
-            SERVICE_RESTART_SYSTEM,
-            SERVICE_ENABLE_NODE,
-            SERVICE_DISABLE_NODE,
-            SERVICE_ENABLE_LIBRARY,
-            SERVICE_DISABLE_LIBRARY,
-            SERVICE_RESCAN_LIBRARY,
-            SERVICE_RESCAN_ALL_LIBRARIES,
-            SERVICE_ENABLE_FLOW,
-            SERVICE_DISABLE_FLOW,
-            SERVICE_REPROCESS_FILE,
-            SERVICE_ABORT_WORKER,
-            SERVICE_RUN_TASK,
-            SERVICE_FORCE_PROCESSING,
-            SERVICE_UNHOLD_FILES,
-        ]:
-            hass.services.async_remove(DOMAIN, service)
-
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-def _get_coordinator(hass: HomeAssistant) -> FileFlowsDataUpdateCoordinator:
-    """Get the first coordinator."""
-    for coordinator in hass.data[DOMAIN].values():
-        return coordinator
-    raise ValueError("No FileFlows coordinator found")
-
-
-async def _async_register_services(hass: HomeAssistant) -> None:
-    """Register FileFlows services."""
-
-    # Skip if already registered
-    if hass.services.has_service(DOMAIN, SERVICE_PAUSE_SYSTEM):
-        return
-
-    # =========================================================================
-    # System Services
-    # =========================================================================
-    async def async_pause_system(call: ServiceCall) -> None:
-        """Pause the system."""
-        coordinator = _get_coordinator(hass)
-        await coordinator.api.pause_system()
-        await coordinator.async_request_refresh()
-
-    async def async_resume_system(call: ServiceCall) -> None:
-        """Resume the system."""
-        coordinator = _get_coordinator(hass)
-        await coordinator.api.resume_system()
-        await coordinator.async_request_refresh()
-
-    async def async_restart_system(call: ServiceCall) -> None:
-        """Restart the system."""
-        coordinator = _get_coordinator(hass)
-        await coordinator.api.restart_system()
-
-    # =========================================================================
-    # Node Services
-    # =========================================================================
-    async def async_enable_node(call: ServiceCall) -> None:
-        """Enable a node."""
-        coordinator = _get_coordinator(hass)
-        node_uid = call.data[ATTR_NODE_UID]
-        await coordinator.api.enable_node(node_uid)
-        await coordinator.async_request_refresh()
-
-    async def async_disable_node(call: ServiceCall) -> None:
-        """Disable a node."""
-        coordinator = _get_coordinator(hass)
-        node_uid = call.data[ATTR_NODE_UID]
-        await coordinator.api.disable_node(node_uid)
-        await coordinator.async_request_refresh()
-
-    # =========================================================================
-    # Library Services
-    # =========================================================================
-    async def async_enable_library(call: ServiceCall) -> None:
-        """Enable a library."""
-        coordinator = _get_coordinator(hass)
-        lib_uid = call.data[ATTR_LIBRARY_UID]
-        await coordinator.api.enable_library(lib_uid)
-        await coordinator.async_request_refresh()
-
-    async def async_disable_library(call: ServiceCall) -> None:
-        """Disable a library."""
-        coordinator = _get_coordinator(hass)
-        lib_uid = call.data[ATTR_LIBRARY_UID]
-        await coordinator.api.disable_library(lib_uid)
-        await coordinator.async_request_refresh()
-
-    async def async_rescan_library(call: ServiceCall) -> None:
-        """Rescan a library."""
-        coordinator = _get_coordinator(hass)
-        lib_uid = call.data[ATTR_LIBRARY_UID]
-        await coordinator.api.rescan_libraries([lib_uid])
-        await coordinator.async_request_refresh()
-
-    async def async_rescan_all_libraries(call: ServiceCall) -> None:
-        """Rescan all enabled libraries."""
-        coordinator = _get_coordinator(hass)
-        await coordinator.api.rescan_all_libraries()
-        await coordinator.async_request_refresh()
-
-    # =========================================================================
-    # Flow Services
-    # =========================================================================
-    async def async_enable_flow(call: ServiceCall) -> None:
-        """Enable a flow."""
-        coordinator = _get_coordinator(hass)
-        flow_uid = call.data[ATTR_FLOW_UID]
-        await coordinator.api.enable_flow(flow_uid)
-        await coordinator.async_request_refresh()
-
-    async def async_disable_flow(call: ServiceCall) -> None:
-        """Disable a flow."""
-        coordinator = _get_coordinator(hass)
-        flow_uid = call.data[ATTR_FLOW_UID]
-        await coordinator.api.disable_flow(flow_uid)
-        await coordinator.async_request_refresh()
-
-    # =========================================================================
-    # File Services
-    # =========================================================================
-    async def async_reprocess_file(call: ServiceCall) -> None:
-        """Reprocess a file."""
-        coordinator = _get_coordinator(hass)
-        file_uid = call.data[ATTR_FILE_UID]
-        await coordinator.api.reprocess_file(file_uid)
-        await coordinator.async_request_refresh()
-
-    async def async_force_processing(call: ServiceCall) -> None:
-        """Force processing of files."""
-        coordinator = _get_coordinator(hass)
-        file_uids = call.data.get(ATTR_FILE_UID, [])
-        if isinstance(file_uids, str):
-            file_uids = [file_uids]
-        # This uses the force-processing endpoint
-        await coordinator.api._post("/api/library-file/force-processing", file_uids)
-        await coordinator.async_request_refresh()
-
-    async def async_unhold_files(call: ServiceCall) -> None:
-        """Unhold files."""
-        coordinator = _get_coordinator(hass)
-        file_uids = call.data.get(ATTR_FILE_UID, [])
-        if isinstance(file_uids, str):
-            file_uids = [file_uids]
-        await coordinator.api.unhold_files(file_uids)
-        await coordinator.async_request_refresh()
-
-    # =========================================================================
-    # Worker Services
-    # =========================================================================
-    async def async_abort_worker(call: ServiceCall) -> None:
-        """Abort a worker."""
-        coordinator = _get_coordinator(hass)
-        worker_uid = call.data[ATTR_WORKER_UID]
-        await coordinator.api.abort_worker(worker_uid)
-        await coordinator.async_request_refresh()
-
-    # =========================================================================
-    # Task Services
-    # =========================================================================
-    async def async_run_task(call: ServiceCall) -> None:
-        """Run a scheduled task."""
-        coordinator = _get_coordinator(hass)
-        task_uid = call.data[ATTR_TASK_UID]
-        await coordinator.api.run_task(task_uid)
-
-    # =========================================================================
-    # Register all services
-    # =========================================================================
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_PAUSE_SYSTEM,
-        async_pause_system,
-        schema=vol.Schema({}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RESUME_SYSTEM,
-        async_resume_system,
-        schema=vol.Schema({}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RESTART_SYSTEM,
-        async_restart_system,
-        schema=vol.Schema({}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_ENABLE_NODE,
-        async_enable_node,
-        schema=vol.Schema({vol.Required(ATTR_NODE_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DISABLE_NODE,
-        async_disable_node,
-        schema=vol.Schema({vol.Required(ATTR_NODE_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_ENABLE_LIBRARY,
-        async_enable_library,
-        schema=vol.Schema({vol.Required(ATTR_LIBRARY_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DISABLE_LIBRARY,
-        async_disable_library,
-        schema=vol.Schema({vol.Required(ATTR_LIBRARY_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RESCAN_LIBRARY,
-        async_rescan_library,
-        schema=vol.Schema({vol.Required(ATTR_LIBRARY_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RESCAN_ALL_LIBRARIES,
-        async_rescan_all_libraries,
-        schema=vol.Schema({}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_ENABLE_FLOW,
-        async_enable_flow,
-        schema=vol.Schema({vol.Required(ATTR_FLOW_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_DISABLE_FLOW,
-        async_disable_flow,
-        schema=vol.Schema({vol.Required(ATTR_FLOW_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REPROCESS_FILE,
-        async_reprocess_file,
-        schema=vol.Schema({vol.Required(ATTR_FILE_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_FORCE_PROCESSING,
-        async_force_processing,
-        schema=vol.Schema({vol.Required(ATTR_FILE_UID): vol.Any(cv.string, [cv.string])}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_UNHOLD_FILES,
-        async_unhold_files,
-        schema=vol.Schema({vol.Required(ATTR_FILE_UID): vol.Any(cv.string, [cv.string])}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_ABORT_WORKER,
-        async_abort_worker,
-        schema=vol.Schema({vol.Required(ATTR_WORKER_UID): cv.string}),
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RUN_TASK,
-        async_run_task,
-        schema=vol.Schema({vol.Required(ATTR_TASK_UID): cv.string}),
-    )
+async def async_migrate_entry(hass: HomeAssistant, entry: FileFlowsConfigEntry) -> bool:
+    """Migrate old entries."""
+    if entry.version > 2:
+        return False
+    if entry.version == 1:
+        # The server no longer accepts username/password; setup starts reauth.
+        data = {
+            k: v for k, v in entry.data.items() if k not in ("username", "password")
+        }
+        hass.config_entries.async_update_entry(entry, data=data, version=2)
+    return True

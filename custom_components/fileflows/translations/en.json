@@ -1,0 +1,362 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to FileFlows",
+        "description": "Enter your FileFlows server details and at least one token.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "ssl": "Use SSL",
+          "verify_ssl": "Verify SSL Certificate",
+          "api_token": "API token",
+          "fenrus_token": "Fenrus webhook token"
+        },
+        "data_description": {
+          "host": "IP address or hostname of your FileFlows server",
+          "port": "Port number (default: 8585)",
+          "ssl": "Enable if using HTTPS",
+          "verify_ssl": "Verify SSL certificate (disable for self-signed)",
+          "api_token": "Token from Config > API in FileFlows (needs a licence). Gives full access.",
+          "fenrus_token": "Token of the free Fenrus endpoint. Gives queue counts, storage savings and update status only."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate FileFlows",
+        "description": "FileFlows at {host} rejected the stored credentials. Enter an API token, a Fenrus webhook token, or both.",
+        "data": {
+          "api_token": "API token",
+          "fenrus_token": "Fenrus webhook token"
+        },
+        "data_description": {
+          "api_token": "Token from Config > API in FileFlows (needs a licence).",
+          "fenrus_token": "Token of the free Fenrus endpoint."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure FileFlows",
+        "description": "Change the connection settings of this FileFlows server.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "ssl": "Use SSL",
+          "verify_ssl": "Verify SSL Certificate",
+          "api_token": "API token",
+          "fenrus_token": "Fenrus webhook token"
+        },
+        "data_description": {
+          "host": "IP address or hostname of your FileFlows server",
+          "port": "Port number (default: 8585)",
+          "ssl": "Enable if using HTTPS",
+          "verify_ssl": "Verify SSL certificate (disable for self-signed)",
+          "api_token": "Token from Config > API in FileFlows (needs a licence). Gives full access.",
+          "fenrus_token": "Token of the free Fenrus endpoint. Gives queue counts, storage savings and update status only."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to FileFlows",
+      "invalid_auth": "FileFlows rejected the token",
+      "api_disabled": "The endpoint is disabled. Enable Config > API in FileFlows (needs a licence) or use the free Fenrus endpoint token instead.",
+      "no_token": "Enter an API token, a Fenrus webhook token, or both",
+      "invalid_host": "Enter only a hostname or IP address, without scheme or path",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This FileFlows server is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Re-configuration was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "FileFlows Options",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "queue_size": { "name": "Queue Size" },
+      "files_unprocessed": { "name": "Unprocessed Files" },
+      "files_processing": { "name": "Processing Files" },
+      "files_processed": { "name": "Processed Files" },
+      "files_failed": { "name": "Failed Files" },
+      "files_on_hold": { "name": "Files On Hold" },
+      "files_out_of_schedule": { "name": "Files Out of Schedule" },
+      "current_file": { "name": "Current File" },
+      "active_workers": { "name": "Active Workers" },
+      "processing_time": { "name": "Processing Time" },
+      "storage_saved": { "name": "Storage Saved" },
+      "storage_saved_percent": { "name": "Storage Saved Percentage" },
+      "nodes_count": { "name": "Processing Nodes" },
+      "libraries_count": { "name": "Libraries" },
+      "flows_count": { "name": "Flows" },
+      "plugins_count": { "name": "Plugins" },
+      "tasks_count": { "name": "Scheduled Tasks" },
+      "version": { "name": "Version" },
+      "upcoming_count": { "name": "Upcoming Files" },
+      "recently_finished_count": { "name": "Recently Finished" },
+      "nvidia_gpu_usage": { "name": "NVIDIA GPU Usage" },
+      "nvidia_memory_usage": { "name": "NVIDIA Memory Usage" },
+      "nvidia_encoder_usage": { "name": "NVIDIA Encoder Usage" },
+      "nvidia_decoder_usage": { "name": "NVIDIA Decoder Usage" },
+      "nvidia_temperature": { "name": "NVIDIA Temperature" }
+    },
+    "binary_sensor": {
+      "system_paused": { "name": "System Paused" },
+      "processing_active": { "name": "Processing Active" },
+      "has_failed_files": { "name": "Has Failed Files" },
+      "has_files_on_hold": { "name": "Has Files On Hold" },
+      "queue_not_empty": { "name": "Queue Not Empty" },
+      "update_available": { "name": "Update Available" },
+      "all_nodes_enabled": { "name": "All Nodes Enabled" },
+      "has_nvidia": { "name": "NVIDIA Available" },
+      "node_enabled": { "name": "Node {name} Enabled" },
+      "library_enabled": { "name": "Library {name} Enabled" }
+    },
+    "switch": {
+      "system_active": { "name": "System Active" },
+      "node": { "name": "Node {name}" },
+      "library": { "name": "Library {name}" },
+      "flow": { "name": "Flow {name}" }
+    },
+    "button": {
+      "pause": { "name": "Pause System" },
+      "resume": { "name": "Resume System" },
+      "restart": { "name": "Restart Server" },
+      "rescan_all": { "name": "Rescan All Libraries" },
+      "refresh": { "name": "Refresh Data" },
+      "library_rescan": { "name": "Rescan {name}" },
+      "task_run": { "name": "Run Task {name}" }
+    }
+  },
+  "exceptions": {
+    "api_error": {
+      "message": "FileFlows request failed: {error}"
+    },
+    "entry_not_loaded": {
+      "message": "Config entry {entry_id} is not a loaded FileFlows entry"
+    },
+    "entry_required": {
+      "message": "Select a FileFlows config entry; this action needs exactly one loaded entry or an explicit config_entry_id"
+    }
+  },
+  "services": {
+    "pause_system": {
+      "name": "Pause System",
+      "description": "Pause FileFlows processing.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Pause for this many minutes. Leave empty to pause until resumed."
+        }
+      }
+    },
+    "resume_system": {
+      "name": "Resume System",
+      "description": "Resume FileFlows processing.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        }
+      }
+    },
+    "restart_system": {
+      "name": "Restart System",
+      "description": "Restart the FileFlows server.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        }
+      }
+    },
+    "enable_node": {
+      "name": "Enable Node",
+      "description": "Enable a processing node.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "node_uid": {
+          "name": "Node UID",
+          "description": "The UID of the node to enable."
+        }
+      }
+    },
+    "disable_node": {
+      "name": "Disable Node",
+      "description": "Disable a processing node.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "node_uid": {
+          "name": "Node UID",
+          "description": "The UID of the node to disable."
+        }
+      }
+    },
+    "enable_library": {
+      "name": "Enable Library",
+      "description": "Enable a library.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "library_uid": {
+          "name": "Library UID",
+          "description": "The UID of the library to enable."
+        }
+      }
+    },
+    "disable_library": {
+      "name": "Disable Library",
+      "description": "Disable a library.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "library_uid": {
+          "name": "Library UID",
+          "description": "The UID of the library to disable."
+        }
+      }
+    },
+    "rescan_library": {
+      "name": "Rescan Library",
+      "description": "Rescan a library for new files.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "library_uid": {
+          "name": "Library UID",
+          "description": "The UID of the library to rescan."
+        }
+      }
+    },
+    "rescan_all_libraries": {
+      "name": "Rescan All Libraries",
+      "description": "Rescan all enabled libraries for new files.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        }
+      }
+    },
+    "enable_flow": {
+      "name": "Enable Flow",
+      "description": "Enable a flow.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "flow_uid": {
+          "name": "Flow UID",
+          "description": "The UID of the flow to enable."
+        }
+      }
+    },
+    "disable_flow": {
+      "name": "Disable Flow",
+      "description": "Disable a flow.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "flow_uid": {
+          "name": "Flow UID",
+          "description": "The UID of the flow to disable."
+        }
+      }
+    },
+    "reprocess_file": {
+      "name": "Reprocess File",
+      "description": "Reprocess a library file.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "file_uid": {
+          "name": "File UID",
+          "description": "The UID of the file to reprocess."
+        }
+      }
+    },
+    "force_processing": {
+      "name": "Force Processing",
+      "description": "Force processing of files that are out of schedule.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "file_uid": {
+          "name": "File UID(s)",
+          "description": "The UID(s) of the file(s) to force process."
+        }
+      }
+    },
+    "unhold_files": {
+      "name": "Unhold Files",
+      "description": "Unhold library files.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "file_uid": {
+          "name": "File UID(s)",
+          "description": "The UID(s) of the file(s) to unhold."
+        }
+      }
+    },
+    "abort_worker": {
+      "name": "Abort Worker",
+      "description": "Abort a running worker.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "worker_uid": {
+          "name": "Worker UID",
+          "description": "UID of the running library file to abort, from the `workers` attribute of the active workers sensor."
+        }
+      }
+    },
+    "run_task": {
+      "name": "Run Task",
+      "description": "Run a scheduled task immediately.",
+      "fields": {
+        "config_entry_id": {
+          "name": "FileFlows server",
+          "description": "Server to act on. Required when more than one is configured."
+        },
+        "task_uid": {
+          "name": "Task UID",
+          "description": "The UID of the task to run."
+        }
+      }
+    }
+  }
+}
